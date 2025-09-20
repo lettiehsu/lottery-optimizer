@@ -5,6 +5,7 @@ import os
 import glob
 import json
 import ast
+import sys
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 from flask import Flask, render_template, request, jsonify, Response
@@ -21,6 +22,29 @@ app.config.update(
 DATA_DIR = os.getenv("DATA_DIR", "/tmp")
 BUY_DIR = os.path.join(DATA_DIR, "buylists")
 os.makedirs(BUY_DIR, exist_ok=True)
+
+# ------------------------------------------------------------------------------
+# Global error handler — ALWAYS shows the real traceback
+# ------------------------------------------------------------------------------
+@app.errorhandler(Exception)
+def handle_any_error(e):
+    tb = traceback.format_exc()
+    # Log to server logs
+    print("UNCAUGHT ERROR:", e, file=sys.stderr)
+    print(tb, file=sys.stderr)
+
+    # JSON for API routes
+    if request.path in ("/run_json", "/confirm_json", "/recent", "/health"):
+        return jsonify({
+            "ok": False,
+            "where": request.path,
+            "error": f"{e.__class__.__name__}: {e}",
+            "trace": tb,
+        }), 500
+
+    # Plain text for everything else (avoids Flask default HTML)
+    return Response(f"ERROR at {request.path}:\n\n{e.__class__.__name__}: {e}\n\n{tb}",
+                    status=500, mimetype="text/plain")
 
 # ------------------------------------------------------------------------------
 # Jinja filters used by templates
@@ -71,12 +95,9 @@ def parse_literal(s: str):
         if "]" in s and s.count("]") == 1 and "," in s.split("]")[-1]:
             left, right = s.split("]", 1)
             left += "]"
-            try:
-                mains = ast.literal_eval(left)
-                bonus = int(right.strip().lstrip(",").strip())
-                return (mains, bonus)
-            except Exception:
-                pass
+            mains = ast.literal_eval(left)
+            bonus = int(right.strip().lstrip(",").strip())
+            return (mains, bonus)
         raise
 
 def list_recent_buyfiles(limit: int = 10) -> List[str]:
@@ -108,42 +129,34 @@ def home():
 
 @app.get("/health")
 def health():
-    return "OK", 200
+    return jsonify({"ok": True})
 
 @app.get("/recent")
 def recent():
     return jsonify({"ok": True, "files": list_recent_buyfiles(), "dir": BUY_DIR})
 
 # --------------------------- JSON DEBUG ROUTES ---------------------------
-# These never touch the template. Use them to see raw errors clearly.
 @app.post("/run_json")
 def run_phase12_json():
     if IMPORT_ERR:
         return jsonify({"ok": False, "where": "import", "error": IMPORT_ERR}), 500
     if core is None:
         return jsonify({"ok": False, "where": "import", "error": "core is None"}), 500
-    try:
-        f = request.form
-        cfg = {
-            "LATEST_MM": parse_literal(f.get("LATEST_MM", "")),
-            "LATEST_PB": parse_literal(f.get("LATEST_PB", "")),
-            "LATEST_IL_JP": parse_literal(f.get("LATEST_IL_JP", "")),
-            "LATEST_IL_M1": parse_literal(f.get("LATEST_IL_M1", "")),
-            "LATEST_IL_M2": parse_literal(f.get("LATEST_IL_M2", "")),
-            "runs": int(f.get("runs", "100") or "100"),
-            "quiet": (f.get("quiet", "on") == "on"),
-            "DATA_DIR": DATA_DIR,
-            "BUY_DIR": BUY_DIR,
-        }
-        res = core.run_phase_1_and_2(cfg)
-        return jsonify({"ok": True, "res": res})
-    except Exception as e:
-        return jsonify({
-            "ok": False,
-            "where": "run_phase12_json",
-            "error": f"{e.__class__.__name__}: {e}",
-            "trace": traceback.format_exc(),
-        }), 500
+
+    f = request.form
+    cfg = {
+        "LATEST_MM": parse_literal(f.get("LATEST_MM", "")),
+        "LATEST_PB": parse_literal(f.get("LATEST_PB", "")),
+        "LATEST_IL_JP": parse_literal(f.get("LATEST_IL_JP", "")),
+        "LATEST_IL_M1": parse_literal(f.get("LATEST_IL_M1", "")),
+        "LATEST_IL_M2": parse_literal(f.get("LATEST_IL_M2", "")),
+        "runs": int(f.get("runs", "100") or "100"),
+        "quiet": (f.get("quiet", "on") == "on"),
+        "DATA_DIR": DATA_DIR,
+        "BUY_DIR": BUY_DIR,
+    }
+    res = core.run_phase_1_and_2(cfg)
+    return jsonify({"ok": True, "res": res})
 
 @app.post("/confirm_json")
 def confirm_phase3_json():
@@ -151,39 +164,30 @@ def confirm_phase3_json():
         return jsonify({"ok": False, "where": "import", "error": IMPORT_ERR}), 500
     if core is None:
         return jsonify({"ok": False, "where": "import", "error": "core is None"}), 500
-    try:
-        f = request.form
-        saved_input = (f.get("saved_path", "") or "").strip()
-        saved_path = (
-            os.path.join(BUY_DIR, os.path.basename(saved_input))
-            if saved_input and not os.path.isabs(saved_input)
-            else saved_input
-        )
-        nwj = {
-            "NWJ_MM": parse_literal(f.get("NWJ_MM", "")),
-            "NWJ_PB": parse_literal(f.get("NWJ_PB", "")),
-            "NWJ_IL_JP": parse_literal(f.get("NWJ_IL_JP", "")),
-            "NWJ_IL_M1": parse_literal(f.get("NWJ_IL_M1", "")),
-            "NWJ_IL_M2": parse_literal(f.get("NWJ_IL_M2", "")),
-            "also_recall": (f.get("also_recall", "on") == "on"),
-        }
-        res = core.confirm_phase_3(saved_path, nwj)
-        return jsonify({"ok": True, "res": res})
-    except Exception as e:
-        return jsonify({
-            "ok": False,
-            "where": "confirm_phase3_json",
-            "error": f"{e.__class__.__name__}: {e}",
-            "trace": traceback.format_exc(),
-        }), 500
+
+    f = request.form
+    saved_input = (f.get("saved_path", "") or "").strip()
+    saved_path = (
+        os.path.join(BUY_DIR, os.path.basename(saved_input))
+        if saved_input and not os.path.isabs(saved_input)
+        else saved_input
+    )
+    nwj = {
+        "NWJ_MM": parse_literal(f.get("NWJ_MM", "")),
+        "NWJ_PB": parse_literal(f.get("NWJ_PB", "")),
+        "NWJ_IL_JP": parse_literal(f.get("NWJ_IL_JP", "")),
+        "NWJ_IL_M1": parse_literal(f.get("NWJ_IL_M1", "")),
+        "NWJ_IL_M2": parse_literal(f.get("NWJ_IL_M2", "")),
+        "also_recall": (f.get("also_recall", "on") == "on"),
+    }
+    res = core.confirm_phase_3(saved_path, nwj)
+    return jsonify({"ok": True, "res": res})
 
 # --------------------------- FORM BUTTON ROUTES --------------------------
-# Keep your existing UX; these call the JSON endpoints above, then render.
 @app.post("/run")
 def run_phase12():
     j = run_phase12_json()
     if j.status_code != 200:
-        # Pass the JSON error through the template renderer (shows it nicely)
         payload = j.get_json(silent=True) or {}
         return _render_safe(res=None, err_text=json.dumps(payload, indent=2))
     payload = j.get_json(silent=True) or {}
