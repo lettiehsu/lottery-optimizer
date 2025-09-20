@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; max-width: 1000px; margin: 32px auto; padding: 0 16px; }
+    pre { background:#0b0d10; color:#e6edf3; padding: 16px; border-radius: 12px; overflow:auto; }
+    a.button { background:#111827; color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none; }
+    .muted { color:#6b7280; }
+  </style>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  {% if saved_json %}
+    <p><a class="button" href="/download/{{ saved_json }}">Download saved buy list JSON</a>
+       <span class="muted">({{ saved_json }})</span></p>
+  {% endif %}
+  <pre>{{ pre }}</pre>
+  <p><a href="/">← back</a></p>
+</body>
+</html>
