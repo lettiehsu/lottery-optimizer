@@ -1,15 +1,22 @@
 # app.py
 from __future__ import annotations
 from flask import Flask, render_template, request, jsonify
-import os, json, traceback, datetime as dt
-from werkzeug.utils import secure_filename
+import os, traceback, json, glob, datetime as dt
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Flask / templating
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Flask setup
+# -----------------------------------------------------------------------------
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
-# Jinja filter: right-justify strings like Python's str.rjust
+# Small helper: pad loop indices to 2 digits (01, 02, …)
+@app.template_filter("pad2")
+def pad2_filter(x):
+    try:
+        return f"{int(x):02d}"
+    except Exception:
+        return str(x)
+
+# Jinja filter: right-justify a string (backup if you want to use it)
 @app.template_filter("rjust")
 def rjust_filter(s, width=0, fillchar=" "):
     s = "" if s is None else str(s)
@@ -20,17 +27,9 @@ def rjust_filter(s, width=0, fillchar=" "):
     f = str(fillchar)[0] if fillchar else " "
     return s.rjust(w, f)
 
-# Optional: zero-pad 2 digits
-@app.template_filter("pad2")
-def pad2(n):
-    try:
-        return f"{int(n):02d}"
-    except Exception:
-        return str(n)
-
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Import lottery_core safely
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 try:
     import lottery_core as core
 except Exception as e:
@@ -39,212 +38,177 @@ except Exception as e:
 else:
     IMPORT_ERR = None
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Config / storage dirs
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Config / storage
+# -----------------------------------------------------------------------------
 DATA_DIR = os.environ.get("DATA_DIR", "/tmp")
-BUY_DIR  = os.path.join(DATA_DIR, "buylists")
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(BUY_DIR,  exist_ok=True)
+BUY_DIR = os.path.join(DATA_DIR, "buylists")
+os.makedirs(BUY_DIR, exist_ok=True)
 
-ALLOWED_TXT = {"txt", "csv"}
+ALLOWED_TEXT = {".txt", ".csv"}
 
-def _ok_ext(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_TXT
+def _recent_buylists(limit: int = 10):
+    patt = os.path.join(BUY_DIR, "buy_session_*.json")
+    files = sorted(glob.glob(patt), reverse=True)
+    return [os.path.basename(p) for p in files[:limit]]
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers to parse tiny inputs coming from the form
-# ──────────────────────────────────────────────────────────────────────────────
-def _parse_list_ints(s: str) -> list[int]:
-    """Parse '1,2,3,4' or '[1,2,3,4]' into [1,2,3,4]."""
-    if not s:
-        return []
-    s = s.strip()
+def _render_safe(res=None, error=None):
     try:
-        # allow JSON-style
-        if s.startswith("[") and s.endswith("]"):
-            return [int(x) for x in json.loads(s)]
-    except Exception:
-        pass
-    # fallback: split by comma
-    parts = [p.strip() for p in s.split(",") if p.strip()]
-    out = []
-    for p in parts:
-        try:
-            out.append(int(p))
-        except Exception:
-            pass
-    return out
+        return render_template(
+            "report.html",
+            res=res,
+            error=error or IMPORT_ERR,
+            data_dir=DATA_DIR,
+            recent=_recent_buylists(20),
+        )
+    except Exception as e:
+        # If template ever errors, show a plain page
+        return f"""<h1>Template rendering error.</h1>
+<pre>ERROR: {e}</pre>
+<pre>TRACEBACK:\n{traceback.format_exc()}</pre>
+<pre>RES:\n{repr(res)}</pre>
+<pre>ORIGINAL ERROR:\n{error}</pre>""", 500
 
-def _parse_mm_pb_pair(s: str) -> tuple[list[int], int] | None:
-    """
-    Accepts:
-      '[14,15,32,42,49],1'
-      '([14,15,32,42,49],1)'
-      '14,15,32,42,49 | 1'
-    Returns (mains, bonus) or None.
-    """
-    if not s:
-        return None
-    raw = s.strip().strip("()")
-    if "|" in raw:
-        left, right = raw.split("|", 1)
-        mains = _parse_list_ints(left)
-        try:
-            bonus = int(right.strip())
-        except Exception:
-            return None
-        return (mains, bonus)
-    if "," in raw and raw.count("[") == 1:
-        # like '[..],1'
-        left, right = raw.split("]", 1)
-        mains = _parse_list_ints(left + "]")
-        right = right.strip().lstrip(",").strip()
-        try:
-            bonus = int(right)
-        except Exception:
-            return None
-        return (mains, bonus)
-    # last resort: JSON
-    try:
-        j = json.loads(raw)
-        if isinstance(j, list) and len(j) == 2 and isinstance(j[0], list):
-            return ( [int(x) for x in j[0]], int(j[1]) )
-    except Exception:
-        pass
-    return None
-
-def _parse_il_list(s: str) -> list[int] | None:
-    """Accept '[1,4,5,10,18,49]' -> list or '' -> None."""
-    lst = _parse_list_ints(s or "")
-    return lst or None
-
-def _recent_buylists(n: int = 10) -> list[str]:
-    try:
-        files = [f for f in os.listdir(BUY_DIR) if f.startswith("buy_session_") and f.endswith(".json")]
-        files.sort(reverse=True)
-        return files[:n]
-    except Exception:
-        return []
-
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Routes
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 @app.route("/", methods=["GET"])
 def index():
-    return render_template(
-        "report.html",
-        res=None,
-        error=IMPORT_ERR,
-        recent=_recent_buylists(),
-        data_dir=DATA_DIR,
-    )
+    return _render_safe(res=None, error=None)
 
-@app.post("/upload")
+@app.route("/upload", methods=["POST"])
 def upload():
-    """Uploads optional history/feed files (just stores them)."""
+    """
+    Optional helper to stash your CSV/txt inputs on the server.
+    We just save them into DATA_DIR; lottery_core can read them if you make it.
+    """
     if IMPORT_ERR:
-        return jsonify({"ok": False, "error": IMPORT_ERR}), 500
+        return _render_safe(error=IMPORT_ERR)
 
     saved = []
-    for field in ["mm_hist", "pb_hist", "il_hist", "mm_feed", "pb_feed", "il_feed"]:
-        f = request.files.get(field)
-        if not f or f.filename == "":
-            continue
-        if not _ok_ext(f.filename):
-            return jsonify({"ok": False, "error": f"Bad extension for {f.filename}"}), 400
-        safe = secure_filename(f.filename)
-        path = os.path.join(DATA_DIR, safe)
-        f.save(path)
-        saved.append(path)
+    try:
+        for field in ("mm_hist", "pb_hist", "il_hist", "mm_feed", "pb_feed", "il_feed"):
+            file = request.files.get(field)
+            if not file or file.filename == "":
+                continue
+            name = os.path.basename(file.filename)
+            _, ext = os.path.splitext(name)
+            # keep any text-y file; you can harden this as you like
+            if ext.lower() not in ALLOWED_TEXT:
+                continue
+            dst = os.path.join(DATA_DIR, name)
+            file.save(dst)
+            saved.append(dst)
 
-    return jsonify({"ok": True, "saved": saved})
+        msg = {"uploaded": saved, "data_dir": DATA_DIR}
+        return _render_safe(res={"upload": msg}, error=None)
+    except Exception as e:
+        return _render_safe(res=None, error=f"Upload failed: {e}\n\n{traceback.format_exc()}")
 
-@app.post("/run_phase12")
+@app.route("/run_phase12", methods=["POST"])
 def run_phase12():
-    """Generate 50-row batches, print Phase-1 hits, simulate Phase-2, and save buy list JSON."""
     if IMPORT_ERR:
-        return render_template("report.html", res=None, error=IMPORT_ERR, recent=_recent_buylists(), data_dir=DATA_DIR)
-
-    # Pull LATEST_* from form
-    latest_mm = _parse_mm_pb_pair(request.form.get("LATEST_MM", "").strip())
-    latest_pb = _parse_mm_pb_pair(request.form.get("LATEST_PB", "").strip())
-    latest_il_jp = _parse_il_list(request.form.get("LATEST_IL_JP", "").strip())
-    latest_il_m1 = _parse_il_list(request.form.get("LATEST_IL_M1", "").strip())
-    latest_il_m2 = _parse_il_list(request.form.get("LATEST_IL_M2", "").strip())
-
-    runs = request.form.get("runs", "100").strip()
-    try:
-        runs = max(1, min(500, int(runs)))
-    except Exception:
-        runs = 100
-
-    quiet = bool(request.form.get("quiet"))  # checkbox
-
-    config = {
-        "LATEST_MM": latest_mm,
-        "LATEST_PB": latest_pb,
-        "LATEST_IL_JP": latest_il_jp,
-        "LATEST_IL_M1": latest_il_m1,
-        "LATEST_IL_M2": latest_il_m2,
-        "runs": runs,
-        "quiet": quiet,
-        "DATA_DIR": DATA_DIR,
-        "BUY_DIR": BUY_DIR,
-    }
+        return _render_safe(error=IMPORT_ERR)
+    if core is None or not hasattr(core, "run_phase_1_and_2"):
+        return _render_safe(error="lottery_core.run_phase_1_and_2 is missing.")
 
     try:
-        result = core.run_phase_1_and_2(config)
+        # Parse simple inputs from the form
+        def parse_mm_pb(text):
+            # "[10,14,34,40,43],5"  ->  ([..], 5)
+            text = (text or "").strip()
+            if not text:
+                return None
+            mains_s, bonus_s = text.split("]")
+            mains_s = mains_s.strip().lstrip("[").strip()
+            mains = [int(x) for x in mains_s.split(",") if x.strip()]
+            bonus = int(bonus_s.strip().lstrip(","))
+            return (mains, bonus)
+
+        def parse_il(text):
+            # "[1,4,5,10,18,49]" -> [..]
+            text = (text or "").strip()
+            if not text:
+                return None
+            arr = text.strip().lstrip("[").rstrip("]")
+            return [int(x) for x in arr.split(",") if x.strip()]
+
+        cfg = {
+            "LATEST_MM": parse_mm_pb(request.form.get("LATEST_MM")),
+            "LATEST_PB": parse_mm_pb(request.form.get("LATEST_PB")),
+            "LATEST_IL_JP": parse_il(request.form.get("LATEST_IL_JP")),
+            "LATEST_IL_M1": parse_il(request.form.get("LATEST_IL_M1")),
+            "LATEST_IL_M2": parse_il(request.form.get("LATEST_IL_M2")),
+            "runs": int(request.form.get("runs") or 100),
+            "quiet": bool(request.form.get("quiet")),
+            "save_dir": BUY_DIR,
+            "data_dir": DATA_DIR,
+        }
+
+        res = core.run_phase_1_and_2(cfg)
+        # Attach where we saved things (for the template display)
+        res = res or {}
+        res.setdefault("saved_path", None)
+        return _render_safe(res=res, error=None)
+
     except Exception as e:
-        err = f"run_phase_1_and_2 crashed: {e}\n\n{traceback.format_exc()}"
-        return render_template("report.html", res=None, error=err, recent=_recent_buylists(), data_dir=DATA_DIR)
+        return _render_safe(res=None, error=f"Phase 1/2 failed: {e}\n\n{traceback.format_exc()}")
 
-    return render_template("report.html", res=result, error=None, recent=_recent_buylists(), data_dir=DATA_DIR)
-
-@app.post("/confirm_phase3")
+@app.route("/confirm_phase3", methods=["POST"])
 def confirm_phase3():
-    """Confirmation-only vs NWJ for a previously saved JSON (exact tickets)."""
     if IMPORT_ERR:
-        return render_template("report.html", res=None, error=IMPORT_ERR, recent=_recent_buylists(), data_dir=DATA_DIR)
-
-    filename = request.form.get("saved_file", "").strip()
-    saved_path = os.path.join(BUY_DIR, os.path.basename(filename)) if filename else ""
-
-    # NWJ fields (all optional)
-    nwj_mm = _parse_mm_pb_pair(request.form.get("NWJ_MM", "").strip())
-    nwj_pb = _parse_mm_pb_pair(request.form.get("NWJ_PB", "").strip())
-    nwj_il_jp = _parse_il_list(request.form.get("NWJ_IL_JP", "").strip())
-    nwj_il_m1 = _parse_il_list(request.form.get("NWJ_IL_M1", "").strip())
-    nwj_il_m2 = _parse_il_list(request.form.get("NWJ_IL_M2", "").strip())
-
-    recall_headings = bool(request.form.get("recall_headings"))
-
-    nwj = {
-        "NWJ_MM": nwj_mm,
-        "NWJ_PB": nwj_pb,
-        "NWJ_IL_JP": nwj_il_jp,
-        "NWJ_IL_M1": nwj_il_m1,
-        "NWJ_IL_M2": nwj_il_m2,
-        "recall_headings": recall_headings,
-        "BUY_DIR": BUY_DIR,
-    }
+        return _render_safe(error=IMPORT_ERR)
+    if core is None or not hasattr(core, "confirm_phase_3"):
+        return _render_safe(error="lottery_core.confirm_phase_3 is missing.")
 
     try:
-        result = core.confirm_phase_3(saved_path, nwj)
+        saved_file = request.form.get("saved_file") or ""
+        if saved_file and not os.path.isabs(saved_file):
+            saved_file = os.path.join(BUY_DIR, os.path.basename(saved_file))
+
+        def parse_mm_pb(text):
+            text = (text or "").strip()
+            if not text:
+                return None
+            mains_s, bonus_s = text.split("]")
+            mains_s = mains_s.strip().lstrip("[").strip()
+            mains = [int(x) for x in mains_s.split(",") if x.strip()]
+            bonus = int(bonus_s.strip().lstrip(","))
+            return (mains, bonus)
+
+        def parse_il(text):
+            text = (text or "").strip()
+            if not text:
+                return None
+            arr = text.strip().lstrip("[").rstrip("]")
+            return [int(x) for x in arr.split(",") if x.strip()]
+
+        nwj = {
+            "NWJ_MM": parse_mm_pb(request.form.get("NWJ_MM")),
+            "NWJ_PB": parse_mm_pb(request.form.get("NWJ_PB")),
+            "NWJ_IL_JP": parse_il(request.form.get("NWJ_IL_JP")),
+            "NWJ_IL_M1": parse_il(request.form.get("NWJ_IL_M1")),
+            "NWJ_IL_M2": parse_il(request.form.get("NWJ_IL_M2")),
+        }
+        recall = bool(request.form.get("recall_headings"))
+
+        res = core.confirm_phase_3(saved_file, nwj, recall_headings=recall)
+        return _render_safe(res=res, error=None)
+
     except Exception as e:
-        err = f"confirm_phase_3 crashed: {e}\n\n{traceback.format_exc()}"
-        return render_template("report.html", res=None, error=err, recent=_recent_buylists(), data_dir=DATA_DIR)
+        return _render_safe(res=None, error=f"Phase 3 failed: {e}\n\n{traceback.format_exc()}")
 
-    return render_template("report.html", res=result, error=None, recent=_recent_buylists(), data_dir=DATA_DIR)
+# -----------------------------------------------------------------------------
+# Health
+# -----------------------------------------------------------------------------
+@app.route("/healthz")
+def health():
+    return jsonify(ok=True, ts=dt.datetime.utcnow().isoformat())
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Simple health route for Render
-# ──────────────────────────────────────────────────────────────────────────────
-@app.get("/healthz")
-def healthz():
-    return jsonify({"ok": True, "time": dt.datetime.utcnow().isoformat() + "Z"})
-
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Local run
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Local dev only
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+    # Local dev: python app.py
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=True)
