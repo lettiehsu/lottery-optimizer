@@ -1,83 +1,245 @@
+/* static/app.js — nicer, structured outputs */
+
 async function postJSON(url, data) {
   const res = await fetch(url, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   const txt = await res.text();
-  return txt;
+  try { return JSON.parse(txt); } catch { return { ok:false, raw: txt }; }
 }
 
-function parseKV(s) {
-  try { return JSON.parse(s); } catch { return s; }
+/* ---------- helpers to render clean cards/tables ---------- */
+
+function el(tag, cls, html) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  return n;
+}
+function copyBtn(text) {
+  const b = el("button", "copy", "Copy");
+  b.onclick = () => { navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(()=>b.textContent="Copy",1200); };
+  return b;
 }
 
-document.getElementById("phase1-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = e.target;
+function pill(x){ return `<span class="pill">${x}</span>`; }
+
+function renderBands(bands) {
+  const wrap = el("div","cards");
+  for (const [game,[lo,hi]] of Object.entries(bands||{})) {
+    const c = el("div","card");
+    c.append(el("h3","",`${game} middle-50% band`));
+    c.append(el("div","kv", `<span>Sum range</span><span class="mono">${lo} – ${hi}</span>`));
+    wrap.append(c);
+  }
+  return wrap;
+}
+
+function renderHitPositions(title, hitsObj, withBonus=false) {
+  // hitsObj shape: {"3":[...], "3B":[...], "4":[...], ...}
+  const c = el("div","card");
+  c.append(el("h3","",title));
+  const tbl = el("table","tbl");
+  const header = el("tr");
+  const cols = withBonus ? ["3","3B","4","4B","5","5B"] : ["3","4","5","6"];
+  header.innerHTML = `<th>Type</th>${cols.map(k=>`<th>${k}</th>`).join("")}`;
+  const thead = el("thead"); thead.append(header);
+  const tbody = el("tbody");
+  const row = el("tr");
+  row.innerHTML = `<td class="muted">Positions</td>` + cols.map(k=>{
+    const arr = hitsObj?.[k] || [];
+    return `<td>${arr.length ? arr.map(pill).join(" ") : `<span class="muted">—</span>`}</td>`;
+  }).join("");
+  tbody.append(row);
+  tbl.append(thead, tbody);
+  c.append(tbl);
+  return c;
+}
+
+function renderBuyList(title, list) {
+  const c = el("div","card");
+  c.append(el("h3","",title));
+  const tbl = el("table","tbl");
+  const thead = el("thead");
+  thead.innerHTML = `<tr><th>#</th><th>Mains</th><th>Bonus</th></tr>`;
+  const tbody = el("tbody");
+  (list||[]).forEach((t,i)=>{
+    const mains = (t.mains||[]).join(", ");
+    const bonus = (t.bonus==null? "—" : t.bonus);
+    const tr = el("tr");
+    tr.innerHTML = `<td>${i+1}</td><td class="mono">${mains}</td><td class="mono">${bonus}</td>`;
+    tbody.append(tr);
+  });
+  tbl.append(thead, tbody);
+  c.append(tbl);
+  return c;
+}
+
+function renderRaw(jsonObj, title="Raw response") {
+  const card = el("div","card");
+  const h = el("h3","",title);
+  const pre = el("pre","raw", JSON.stringify(jsonObj, null, 2));
+  card.append(h, pre);
+  return card;
+}
+
+/* ---------- Phase 1 ---------- */
+
+async function runPhase1() {
   const payload = {
-    LATEST_MM: f.LATEST_MM.value.trim(),
-    LATEST_PB: f.LATEST_PB.value.trim(),
-    LATEST_IL_JP: f.LATEST_IL_JP.value.trim(),
-    LATEST_IL_M1: f.LATEST_IL_M1.value.trim(),
-    LATEST_IL_M2: f.LATEST_IL_M2.value.trim(),
-    FEED_MM: f.FEED_MM.value,
-    FEED_PB: f.FEED_PB.value,
-    FEED_IL: f.FEED_IL.value,
-    HIST_MM_BLOB: f.HIST_MM_BLOB.value,
-    HIST_PB_BLOB: f.HIST_PB_BLOB.value,
-    HIST_IL_BLOB: f.HIST_IL_BLOB.value,
-    phase: "phase1"
+    LATEST_MM: document.querySelector("#p1_mm").value.trim(),
+    LATEST_PB: document.querySelector("#p1_pb").value.trim(),
+    LATEST_IL_JP: document.querySelector("#p1_il_jp").value.trim(),
+    LATEST_IL_M1: document.querySelector("#p1_il_m1").value.trim(),
+    LATEST_IL_M2: document.querySelector("#p1_il_m2").value.trim(),
+    FEED_MM: document.querySelector("#p1_feed_mm").value.trim(),
+    FEED_PB: document.querySelector("#p1_feed_pb").value.trim(),
+    FEED_IL: document.querySelector("#p1_feed_il").value.trim(),
+    HIST_MM_BLOB: document.querySelector("#p1_hist_mm").value.trim(),
+    HIST_PB_BLOB: document.querySelector("#p1_hist_pb").value.trim(),
+    HIST_IL_BLOB: document.querySelector("#p1_hist_il").value.trim(),
+    phase: "phase1",
   };
-  const out = document.getElementById("phase1-output");
-  out.textContent = "Running Phase 1...";
-  try {
-    const resp = await postJSON("/run_json", payload);
-    out.textContent = resp;
-  } catch (err) {
-    out.textContent = "Error: " + err;
-  }
-});
+  const btn = document.querySelector("#btn_p1");
+  btn.disabled = true; btn.textContent = "Running…";
+  const out = document.querySelector("#out_p1"); out.innerHTML = "";
 
-document.getElementById("phase2-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  const out = document.getElementById("phase2-output");
-  out.textContent = "Running Phase 2 (100×)...";
-  try {
-    const resp = await postJSON("/run_json", {
-      phase: "phase2",
-      saved_path: f.saved_path.value.trim()
-    });
-    out.textContent = resp;
-  } catch (err) {
-    out.textContent = "Error: " + err;
-  }
-});
+  const data = await postJSON("/run_json", payload);
 
-document.getElementById("phase3-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  const out = document.getElementById("phase3-output");
-  out.textContent = "Confirming vs NWJ...";
-  try {
-    const payload = { saved_path: f.saved_path.value.trim() };
-    const maybe = f.NWJ.value.trim();
-    if (maybe) payload.NWJ = parseKV(maybe);
-    const resp = await postJSON("/confirm_json", payload);
-    out.textContent = resp;
-  } catch (err) {
-    out.textContent = "Error: " + err;
+  if (!data || data.error) {
+    out.append(el("div","danger", `Error: ${data?.error || "unknown"}`));
+    if (data?.detail) out.append(el("pre","raw", data.detail));
+    btn.disabled = false; btn.textContent = "Run Phase 1";
+    return;
   }
-});
 
-document.getElementById("btn-recent").addEventListener("click", async () => {
-  const out = document.getElementById("recent-output");
-  out.textContent = "Loading...";
-  try {
-    const res = await fetch("/recent");
-    out.textContent = await res.text();
-  } catch (err) {
-    out.textContent = "Error: " + err;
+  // Bands
+  out.append(renderBands(data.bands));
+
+  // Hits per game
+  const hits = data.eval_vs_NJ || {};
+  const cards = el("div","cards");
+  cards.append(renderHitPositions("MM hits vs NJ", hits.MM, true));
+  cards.append(renderHitPositions("PB hits vs NJ", hits.PB, true));
+  const il = hits.IL || {};
+  cards.append(renderHitPositions("IL Jackpot (6) vs NJ", il.JP, false));
+  cards.append(renderHitPositions("IL Million 1 (6) vs NJ", il.M1, false));
+  cards.append(renderHitPositions("IL Million 2 (6) vs NJ", il.M2, false));
+  out.append(cards);
+
+  // Saved path
+  if (data.saved_path) {
+    const p = el("div","okline", `Saved Phase-1 state: <span class="mono">${data.saved_path}</span>`);
+    p.appendChild(copyBtn(data.saved_path));
+    out.append(p);
   }
-});
+
+  // Raw (collapsible feel)
+  out.append(renderRaw(data, "Raw JSON (for debugging)"));
+  btn.disabled = false; btn.textContent = "Run Phase 1";
+}
+
+/* ---------- Phase 2 ---------- */
+
+async function runPhase2() {
+  const saved = document.querySelector("#p2_saved").value.trim();
+  if (!saved) { alert("Paste the Phase-1 saved_path first."); return; }
+
+  const payload = { phase: "phase2", saved_path: saved };
+  const btn = document.querySelector("#btn_p2");
+  btn.disabled = true; btn.textContent = "Running…";
+  const out = document.querySelector("#out_p2"); out.innerHTML = "";
+
+  const data = await postJSON("/run_json", payload);
+  if (!data || data.error) {
+    out.append(el("div","danger", `Error: ${data?.error || "unknown"}`));
+    if (data?.detail) out.append(el("pre","raw", data.detail));
+    btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
+    return;
+  }
+
+  // Bands
+  out.append(renderBands(data.bands));
+
+  // Buy lists
+  const buys = data.buy_lists || {};
+  const cards = el("div","cards");
+  cards.append(renderBuyList("MM — 10 tickets", buys.MM));
+  cards.append(renderBuyList("PB — 10 tickets", buys.PB));
+  cards.append(renderBuyList("IL — 15 tickets", buys.IL));
+  out.append(cards);
+
+  if (data.saved_path) {
+    const p = el("div","okline", `Saved Phase-2 state: <span class="mono">${data.saved_path}</span>`);
+    p.appendChild(copyBtn(data.saved_path));
+    out.append(p);
+  }
+
+  out.append(renderRaw(data, "Raw JSON (for debugging)"));
+  btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
+}
+
+/* ---------- Phase 3 ---------- */
+
+async function runPhase3() {
+  const saved = document.querySelector("#p3_saved").value.trim();
+  if (!saved) { alert("Paste the Phase-2 saved_path first."); return; }
+
+  let nwj;
+  try { nwj = JSON.parse(document.querySelector("#p3_nwj").value || "{}"); }
+  catch { nwj = null; }
+
+  const payload = { saved_path: saved };
+  if (nwj && Object.keys(nwj).length) payload.NWJ = nwj;
+
+  const btn = document.querySelector("#btn_p3");
+  btn.disabled = true; btn.textContent = "Running…";
+  const out = document.querySelector("#out_p3"); out.innerHTML = "";
+
+  const data = await postJSON("/confirm_json", payload);
+  if (!data || data.error) {
+    out.append(el("div","danger", `Error: ${data?.error || "unknown"}`));
+    if (data?.detail) out.append(el("pre","raw", data.detail));
+    btn.disabled = false; btn.textContent = "Confirm vs NWJ";
+    return;
+  }
+
+  const hits = data.confirm_hits || {};
+  const cards = el("div","cards");
+  cards.append(renderHitPositions("MM — buy list vs NWJ", hits.MM, true));
+  cards.append(renderHitPositions("PB — buy list vs NWJ", hits.PB, true));
+  const il = hits.IL || {};
+  cards.append(renderHitPositions("IL JP — buy list vs NWJ", il.JP, false));
+  cards.append(renderHitPositions("IL M1 — buy list vs NWJ", il.M1, false));
+  cards.append(renderHitPositions("IL M2 — buy list vs NWJ", il.M2, false));
+  out.append(cards);
+
+  out.append(renderRaw(data, "Raw JSON (for debugging)"));
+  btn.disabled = false; btn.textContent = "Confirm vs NWJ";
+}
+
+/* ---------- Recent ---------- */
+
+async function getRecent() {
+  const out = document.querySelector("#out_recent"); out.innerHTML = "";
+  const res = await fetch("/recent"); const data = await res.json();
+  const files = (data.files || []).slice(0, 20);
+  const list = el("div","cards");
+  if (!files.length) list.append(el("div","card","No saved files yet."));
+  files.forEach(f => {
+    const c = el("div","card");
+    c.append(el("div","mono", f));
+    c.append(copyBtn(f));
+    list.append(c);
+  });
+  out.append(list);
+}
+
+/* ---------- wire up ---------- */
+
+document.querySelector("#btn_p1").addEventListener("click", runPhase1);
+document.querySelector("#btn_p2").addEventListener("click", runPhase2);
+document.querySelector("#btn_p3").addEventListener("click", runPhase3);
+document.querySelector("#btn_recent").addEventListener("click", getRecent);
