@@ -15,7 +15,6 @@ def rjust_filter(s, width=0, fillchar=" "):
     f = str(fillchar)[0] if fillchar else " "
     return s.rjust(w, f)
 
-
 # ── Import lottery_core safely ────────────────────────────────────────────────
 try:
     import lottery_core as core
