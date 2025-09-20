@@ -6,83 +6,48 @@ from __future__ import annotations
 import json, os, re, random, datetime
 from typing import List, Tuple, Dict, Optional
 
-# ---------------------------- Config & helpers ---------------------------- #
-
 RNG = random.Random()
 
-# Fallback middle-50% bands if we cannot compute from history
-DEFAULT_SUM_BANDS = {
-    "MM": (155, 201),  # mains 5/70
-    "PB": (146, 207),  # mains 5/69
-    "IL": (121, 158),  # mains 6/50
-}
-
+DEFAULT_SUM_BANDS = {"MM": (155, 201), "PB": (146, 207), "IL": (121, 158)}
 GAME_SPECS = {
     "MM": {"main_n": 5, "main_max": 70, "bonus_max": 25},
     "PB": {"main_n": 5, "main_max": 69, "bonus_max": 26},
     "IL": {"main_n": 6, "main_max": 50, "bonus_max": None},
 }
 
-# Sampling patterns (counts for hot/overdue/undrawn with one anchor VIP or LRR)
 PATTERNS_MM_PB = [
-    ("VIP", {"H":1, "O":0, "U":3}),
-    ("VIP", {"H":1, "O":1, "U":2}),
-    ("VIP", {"H":1, "O":2, "U":1}),
-    ("VIP", {"H":2, "O":0, "U":2}),
-    ("VIP", {"H":2, "O":1, "U":1}),
-    ("VIP", {"H":3, "O":0, "U":1}),
-    ("VIP", {"H":0, "O":1, "U":3}),
-    ("VIP", {"H":0, "O":2, "U":2}),
+    ("VIP", {"H":1, "O":0, "U":3}), ("VIP", {"H":1, "O":1, "U":2}),
+    ("VIP", {"H":1, "O":2, "U":1}), ("VIP", {"H":2, "O":0, "U":2}),
+    ("VIP", {"H":2, "O":1, "U":1}), ("VIP", {"H":3, "O":0, "U":1}),
+    ("VIP", {"H":0, "O":1, "U":3}), ("VIP", {"H":0, "O":2, "U":2}),
     ("VIP", {"H":0, "O":3, "U":1}),
-    ("LRR", {"H":1, "O":0, "U":3}),
-    ("LRR", {"H":1, "O":1, "U":2}),
-    ("LRR", {"H":1, "O":2, "U":1}),
-    ("LRR", {"H":2, "O":0, "U":2}),
-    ("LRR", {"H":2, "O":1, "U":1}),
-    ("LRR", {"H":3, "O":0, "U":1}),
-    ("LRR", {"H":0, "O":1, "U":3}),
-    ("LRR", {"H":0, "O":2, "U":2}),
+    ("LRR", {"H":1, "O":0, "U":3}), ("LRR", {"H":1, "O":1, "U":2}),
+    ("LRR", {"H":1, "O":2, "U":1}), ("LRR", {"H":2, "O":0, "U":2}),
+    ("LRR", {"H":2, "O":1, "U":1}), ("LRR", {"H":3, "O":0, "U":1}),
+    ("LRR", {"H":0, "O":1, "U":3}), ("LRR", {"H":0, "O":2, "U":2}),
     ("LRR", {"H":0, "O":3, "U":1}),
 ]
 
 PATTERNS_IL = [
-    ("VIP", {"H":1, "O":0, "U":4}),
-    ("VIP", {"H":1, "O":1, "U":3}),
-    ("VIP", {"H":1, "O":2, "U":2}),
-    ("VIP", {"H":1, "O":3, "U":1}),
-    ("VIP", {"H":2, "O":0, "U":3}),
-    ("VIP", {"H":2, "O":1, "U":2}),
-    ("VIP", {"H":2, "O":2, "U":1}),
-    ("VIP", {"H":2, "O":3, "U":0}),
-    ("VIP", {"H":3, "O":0, "U":2}),
-    ("VIP", {"H":3, "O":1, "U":1}),
-    ("VIP", {"H":3, "O":2, "U":0}),
-    ("VIP", {"H":4, "O":0, "U":1}),
-    ("VIP", {"H":4, "O":1, "U":0}),
-    ("VIP", {"H":5, "O":0, "U":0}),
-    ("VIP", {"H":0, "O":1, "U":4}),
-    ("VIP", {"H":0, "O":2, "U":3}),
-    ("VIP", {"H":0, "O":3, "U":3}),
-    ("VIP", {"H":0, "O":4, "U":1}),
+    ("VIP", {"H":1, "O":0, "U":4}), ("VIP", {"H":1, "O":1, "U":3}),
+    ("VIP", {"H":1, "O":2, "U":2}), ("VIP", {"H":1, "O":3, "U":1}),
+    ("VIP", {"H":2, "O":0, "U":3}), ("VIP", {"H":2, "O":1, "U":2}),
+    ("VIP", {"H":2, "O":2, "U":1}), ("VIP", {"H":2, "O":3, "U":0}),
+    ("VIP", {"H":3, "O":0, "U":2}), ("VIP", {"H":3, "O":1, "U":1}),
+    ("VIP", {"H":3, "O":2, "U":0}), ("VIP", {"H":4, "O":0, "U":1}),
+    ("VIP", {"H":4, "O":1, "U":0}), ("VIP", {"H":5, "O":0, "U":0}),
+    ("VIP", {"H":0, "O":1, "U":4}), ("VIP", {"H":0, "O":2, "U":3}),
+    ("VIP", {"H":0, "O":3, "U":3}), ("VIP", {"H":0, "O":4, "U":1}),
     ("VIP", {"H":0, "O":5, "U":0}),
-    ("LRR", {"H":1, "O":0, "U":4}),
-    ("LRR", {"H":1, "O":1, "U":3}),
-    ("LRR", {"H":1, "O":2, "U":2}),
-    ("LRR", {"H":1, "O":3, "U":1}),
-    ("LRR", {"H":2, "O":0, "U":3}),
-    ("LRR", {"H":2, "O":1, "U":2}),
-    ("LRR", {"H":2, "O":2, "U":1}),
-    ("LRR", {"H":2, "O":3, "U":0}),
-    ("LRR", {"H":3, "O":0, "U":2}),
-    ("LRR", {"H":3, "O":1, "U":1}),
-    ("LRR", {"H":3, "O":2, "U":0}),
-    ("LRR", {"H":4, "O":0, "U":1}),
-    ("LRR", {"H":4, "O":1, "U":0}),
-    ("LRR", {"H":5, "O":0, "U":0}),
-    ("LRR", {"H":0, "O":1, "U":4}),
-    ("LRR", {"H":0, "O":2, "U":3}),
-    ("LRR", {"H":0, "O":3, "U":3}),
-    ("LRR", {"H":0, "O":4, "U":1}),
+    ("LRR", {"H":1, "O":0, "U":4}), ("LRR", {"H":1, "O":1, "U":3}),
+    ("LRR", {"H":1, "O":2, "U":2}), ("LRR", {"H":1, "O":3, "U":1}),
+    ("LRR", {"H":2, "O":0, "U":3}), ("LRR", {"H":2, "O":1, "U":2}),
+    ("LRR", {"H":2, "O":2, "U":1}), ("LRR", {"H":2, "O":3, "U":0}),
+    ("LRR", {"H":3, "O":0, "U":2}), ("LRR", {"H":3, "O":1, "U":1}),
+    ("LRR", {"H":3, "O":2, "U":0}), ("LRR", {"H":4, "O":0, "U":1}),
+    ("LRR", {"H":4, "O":1, "U":0}), ("LRR", {"H":5, "O":0, "U":0}),
+    ("LRR", {"H":0, "O":1, "U":4}), ("LRR", {"H":0, "O":2, "U":3}),
+    ("LRR", {"H":0, "O":3, "U":3}), ("LRR", {"H":0, "O":4, "U":1}),
     ("LRR", {"H":0, "O":5, "U":0}),
 ]
 
@@ -99,10 +64,6 @@ def _save_json(obj, data_dir: str, prefix: str) -> str:
 # ---------------------------- Parsing inputs ----------------------------- #
 
 def parse_latest_pair(s: str) -> Tuple[List[int], Optional[int]]:
-    """
-    Parse "[a,b,c,d,e], n"  or  "[a,b,c,d,e]" (bonus None).
-    Whitespace tolerated.
-    """
     s = (s or "").strip()
     if not s:
         raise ValueError("LATEST_* is empty")
@@ -198,15 +159,9 @@ def _choose_from(pool: List[int], k: int, exclude: set) -> List[int]:
     RNG.shuffle(cand)
     return cand[:max(0, k)]
 
-def _gen_ticket_with_pattern(
-    game: str,
-    pattern_anchor: str,
-    pattern_counts: Dict[str,int],
-    pools: Dict[str,List[int]],
-    lrr_rotation: List[int],
-    vip_rotation: List[int],
-    sum_band: Tuple[int,int],
-) -> Tuple[List[int], Optional[int]]:
+def _gen_ticket_with_pattern(game: str, pattern_anchor: str, pattern_counts: Dict[str,int],
+                             pools: Dict[str,List[int]], lrr_rotation: List[int],
+                             vip_rotation: List[int], sum_band: Tuple[int,int]) -> Tuple[List[int], Optional[int]]:
     spec = GAME_SPECS[game]
     need = spec["main_n"]
     chosen = []
@@ -214,8 +169,7 @@ def _gen_ticket_with_pattern(
 
     anchor_list = vip_rotation if (pattern_anchor == "VIP" and vip_rotation) else lrr_rotation
     if anchor_list:
-        a = anchor_list.pop(0)
-        anchor_list.append(a)
+        a = anchor_list.pop(0); anchor_list.append(a)
         chosen.append(a); used.add(a)
 
     for key, pool_key in [("H","hot"), ("O","overdue"), ("U","undrawn")]:
@@ -240,8 +194,7 @@ def _gen_ticket_with_pattern(
 
     mains = sorted(chosen[:need])
 
-    s = sum(mains)
-    lo, hi = sum_band
+    s = sum(mains); lo, hi = sum_band
     if not (lo <= s <= hi):
         RNG.shuffle(union)
         fill = []
@@ -250,41 +203,28 @@ def _gen_ticket_with_pattern(
             if n not in set(fill):
                 fill.append(n)
         mains2 = sorted(fill[:need]) if len(fill) >= need else mains
-        s2 = sum(mains2)
-        if lo <= s2 <= hi:
+        if lo <= sum(mains2) <= hi:
             mains = mains2
 
     bonus = None
     if spec["bonus_max"]:
-        b_hot = pools.get("bonus_hot", [])
-        b_over = pools.get("bonus_overdue", [])
-        b_pool = b_hot + b_over
-        if not b_pool:
-            b_pool = list(range(1, spec["bonus_max"]+1))
+        b_hot = pools.get("bonus_hot", []); b_over = pools.get("bonus_overdue", [])
+        b_pool = b_hot + b_over if (b_hot or b_over) else list(range(1, spec["bonus_max"]+1))
         bonus = RNG.choice(b_pool)
 
     return mains, bonus
 
 def build_50_pool(game: str, pools: Dict[str,List[int]], sum_band: Tuple[int,int]) -> List[Tuple[List[int], Optional[int]]]:
     out = []
-    vip_rotation = pools.get("vip", [])[:]
-    lrr_rotation = pools.get("lrr", [])[:]
-    if not vip_rotation:
-        vip_rotation = pools.get("hot", [])[:]
-    if not lrr_rotation:
-        lrr_rotation = pools.get("hot", [])[:]
-
+    vip_rotation = pools.get("vip", [])[:] or pools.get("hot", [])[:]
+    lrr_rotation = pools.get("lrr", [])[:] or pools.get("hot", [])[:]
     patterns = PATTERNS_MM_PB if game in ("MM","PB") else PATTERNS_IL
-    idx = 0
-    guard = 0
+    idx = 0; guard = 0
     while len(out) < 50 and guard < 1000:
         pa, pc = patterns[idx % len(patterns)]
-        mains, bonus = _gen_ticket_with_pattern(
-            game, pa, pc, pools, lrr_rotation, vip_rotation, sum_band
-        )
+        mains, bonus = _gen_ticket_with_pattern(game, pa, pc, pools, lrr_rotation, vip_rotation, sum_band)
         out.append((mains, bonus))
-        idx += 1
-        guard += 1
+        idx += 1; guard += 1
     return out
 
 # ------------------------------- Matching -------------------------------- #
@@ -295,12 +235,9 @@ def match_stats_mm_pb(pool: List[Tuple[List[int], int]], latest: Tuple[List[int]
     for i, (mains, bonus) in enumerate(pool, start=1):
         hit = len(set(mains).intersection(target_mains))
         hasB = (bonus == target_bonus)
-        if hit == 3:
-            (res["3B"] if hasB else res["3"]).append(i)
-        elif hit == 4:
-            (res["4B"] if hasB else res["4"]).append(i)
-        elif hit == 5:
-            (res["5B"] if hasB else res["5"]).append(i)
+        if hit == 3: (res["3B"] if hasB else res["3"]).append(i)
+        elif hit == 4: (res["4B"] if hasB else res["4"]).append(i)
+        elif hit == 5: (res["5B"] if hasB else res["5"]).append(i)
     return res
 
 def match_stats_il(pool: List[Tuple[List[int], None]], latest: List[int]) -> Dict:
@@ -314,26 +251,18 @@ def match_stats_il(pool: List[Tuple[List[int], None]], latest: List[int]) -> Dic
 # ------------------------------- Phases ---------------------------------- #
 
 def _hist_mains_only_mm(hist_mm: List[Tuple[List[int], int]]) -> List[List[int]]:
-    return [row for (row, b) in hist_mm]
+    return [row for (row, _) in hist_mm]
 
-def _sum_band_for_game(game: str, hist_mains: List[List[int]]) -> Tuple[int,int]:
+def middle_band(game: str, hist_mains: List[List[int]]) -> Tuple[int,int]:
     base = DEFAULT_SUM_BANDS[game]
     try:
-        band = middle50_from_hist(hist_mains, base)
-        if band[0] >= band[1]:
-            return base
-        return band
+        q1, q3 = middle50_from_hist(hist_mains, base)
+        return (q1, q3) if q1 < q3 else base
     except Exception:
         return base
 
-def _pools_for_game(
-    game: str,
-    feed_hot: List[int],
-    feed_over: List[int],
-    hist_mains: List[List[int]],
-    bonus_hot: List[int] = None,
-    bonus_over: List[int] = None,
-) -> Dict[str,List[int]]:
+def _pools_for_game(game: str, feed_hot: List[int], feed_over: List[int], hist_mains: List[List[int]],
+                    bonus_hot: List[int] = None, bonus_over: List[int] = None) -> Dict[str,List[int]]:
     spec = GAME_SPECS[game]
     vip = compute_vip(feed_hot, feed_over)
     lrr = compute_lrr(hist_mains)
@@ -352,7 +281,6 @@ def _pools_for_game(
 
 def handle_run(payload: Dict, data_dir: str) -> Dict:
     phase = (payload.get("phase") or "").lower()
-
     if phase == "phase2":
         saved_path = payload.get("saved_path") or ""
         if not saved_path:
@@ -375,9 +303,9 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     hist_pb = parse_hist_blob_mm(payload.get("HIST_PB_BLOB",""))
     hist_il = parse_hist_blob_il(payload.get("HIST_IL_BLOB",""))
 
-    band_mm = _sum_band_for_game("MM", _hist_mains_only_mm(hist_mm))
-    band_pb = _sum_band_for_game("PB", _hist_mains_only_mm(hist_pb))
-    band_il = _sum_band_for_game("IL", hist_il)
+    band_mm = middle_band("MM", _hist_mains_only_mm(hist_mm))
+    band_pb = middle_band("PB", _hist_mains_only_mm(hist_pb))
+    band_il = middle_band("IL", hist_il)
 
     pools_mm = _pools_for_game("MM", f_mm["hot"], f_mm["overdue"], _hist_mains_only_mm(hist_mm), f_mm["bonus_hot"], f_mm["bonus_overdue"])
     pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb), f_pb["bonus_hot"], f_pb["bonus_overdue"])
@@ -394,8 +322,7 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     stats_il_m2 = match_stats_il(pool_il, il_m2)
 
     state = {
-        "created_at": _nowstamp(),
-        "phase": "phase1",
+        "created_at": _nowstamp(), "phase": "phase1",
         "band": {"MM": band_mm, "PB": band_pb, "IL": band_il},
         "pools": {"MM": pools_mm, "PB": pools_pb, "IL": pools_il},
         "pool_rows": {"MM": pool_mm, "PB": pool_pb, "IL": pool_il},
@@ -405,54 +332,36 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     saved_path = _save_json(state, data_dir, "lotto_phase1")
 
     return {
-        "ok": True,
-        "saved_path": saved_path,
+        "ok": True, "saved_path": saved_path,
         "bands": {"MM": band_mm, "PB": band_pb, "IL": band_il},
-        "eval_vs_NJ": {
-            "MM": stats_mm, "PB": stats_pb,
-            "IL": {"JP": stats_il_jp, "M1": stats_il_m1, "M2": stats_il_m2}
-        },
+        "eval_vs_NJ": {"MM": stats_mm, "PB": stats_pb, "IL": {"JP": stats_il_jp, "M1": stats_il_m1, "M2": stats_il_m2}},
         "note": "Use saved_path for Phase 2."
     }
 
 def _promote_newest_into_history(state: Dict) -> Dict:
-    latest = state["latest"]
-    hist = state["history"]
-
+    latest = state["latest"]; hist = state["history"]
     mm_latest = (sorted(latest["MM"][0]), int(latest["MM"][1]))
     pb_latest = (sorted(latest["PB"][0]), int(latest["PB"][1]))
     il_latest = sorted(latest["IL_JP"])
-
-    hist_mm = [mm_latest] + hist["MM"]
-    hist_pb = [pb_latest] + hist["PB"]
-    hist_il = [il_latest] + hist["IL"]
-
-    hist_mm = hist_mm[:20]
-    hist_pb = hist_pb[:20]
-    hist_il = hist_il[:20]
-
-    state["history"] = {"MM": hist_mm, "PB": hist_pb, "IL": hist_il}
+    hist["MM"] = [mm_latest] + hist["MM"]; hist["PB"] = [pb_latest] + hist["PB"]; hist["IL"] = [il_latest] + hist["IL"]
+    hist["MM"] = hist["MM"][:20]; hist["PB"] = hist["PB"][:20]; hist["IL"] = hist["IL"][:20]
     return state
 
 def _aggregate_hits(agg: Dict[str, Dict[str, List[int]]], stats: Dict[str, List[int]]):
     for k, v in stats.items():
-        agg.setdefault(k, [])
-        agg[k].extend(v)
+        agg.setdefault(k, []); agg[k].extend(v)
 
 def _run_phase2(state: Dict, data_dir: str) -> Dict:
     state = _promote_newest_into_history(state)
-
     hist_mm = state["history"]["MM"]; hist_pb = state["history"]["PB"]; hist_il = state["history"]["IL"]
     f_mm = state["pools"]["MM"]; f_pb = state["pools"]["PB"]; f_il = state["pools"]["IL"]
 
-    band_mm = _sum_band_for_game("MM", _hist_mains_only_mm(hist_mm))
-    band_pb = _sum_band_for_game("PB", _hist_mains_only_mm(hist_pb))
-    band_il = _sum_band_for_game("IL", hist_il)
+    band_mm = middle_band("MM", _hist_mains_only_mm(hist_mm))
+    band_pb = middle_band("PB", _hist_mains_only_mm(hist_pb))
+    band_il = middle_band("IL", hist_il)
 
-    pools_mm = _pools_for_game("MM", f_mm["hot"], f_mm["overdue"], _hist_mains_only_mm(hist_mm),
-                               f_mm.get("bonus_hot",[]), f_mm.get("bonus_overdue",[]))
-    pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb),
-                               f_pb.get("bonus_hot",[]), f_pb.get("bonus_overdue",[]))
+    pools_mm = _pools_for_game("MM", f_mm["hot"], f_mm["overdue"], _hist_mains_only_mm(hist_mm), f_mm.get("bonus_hot",[]), f_mm.get("bonus_overdue",[]))
+    pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb), f_pb.get("bonus_hot",[]), f_pb.get("bonus_overdue",[]))
     pools_il = _pools_for_game("IL", f_il["hot"], f_il["overdue"], hist_il)
 
     runs = 100
@@ -466,9 +375,7 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
               "M1":{"3":[], "4":[], "5":[], "6":[]},
               "M2":{"3":[], "4":[], "5":[], "6":[]}}
 
-    freq_mm = {}
-    freq_pb = {}
-    freq_il = {}
+    freq_mm = {}; freq_pb = {}; freq_il = {}
 
     for _ in range(runs):
         pool_mm = build_50_pool("MM", pools_mm, band_mm)
@@ -485,49 +392,37 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
             agg_il["M1"][k].extend(il_stats_m1.get(k,[]))
             agg_il["M2"][k].extend(il_stats_m2.get(k,[]))
 
-        def bump(dct, ticket):
-            dct[ticket] = dct.get(ticket, 0) + 1
+        def bump(d, ticket): d[ticket] = d.get(ticket, 0) + 1
         for t in pool_mm: bump(freq_mm, (tuple(t[0]), t[1]))
         for t in pool_pb: bump(freq_pb, (tuple(t[0]), t[1]))
         for t in pool_il: bump(freq_il, (tuple(t[0]), None))
 
     def top_list(freq_map, n):
         items = sorted(freq_map.items(), key=lambda kv: (-kv[1], kv[0]))
-        out = []
-        used = set()
+        out, used = [], set()
         for (mains, bonus), _score in items:
-            if (mains, bonus) in used:
-                continue
-            out.append({"mains": list(mains), "bonus": bonus})
-            used.add((mains, bonus))
-            if len(out) >= n:
-                break
+            if (mains, bonus) in used: continue
+            out.append({"mains": list(mains), "bonus": bonus}); used.add((mains, bonus))
+            if len(out) >= n: break
         return out
 
-    buy_mm = top_list(freq_mm, 10)
-    buy_pb = top_list(freq_pb, 10)
-    buy_il = top_list(freq_il, 15)
+    buy_mm = top_list(freq_mm, 10); buy_pb = top_list(freq_pb, 10); buy_il = top_list(freq_il, 15)
 
     result = {
-        "ok": True,
-        "phase": "phase2",
+        "ok": True, "phase": "phase2",
         "bands": {"MM": band_mm, "PB": band_pb, "IL": band_il},
         "agg_hits": {"MM": agg_mm, "PB": agg_pb, "IL": agg_il},
         "buy_lists": {"MM": buy_mm, "PB": buy_pb, "IL": buy_il},
     }
 
     state2 = {
-        "created_at": _nowstamp(),
-        "phase": "phase2",
-        "history": state["history"],
-        "latest": state["latest"],
+        "created_at": _nowstamp(), "phase": "phase2",
+        "history": state["history"], "latest": state["latest"],
         "bands": {"MM": band_mm, "PB": band_pb, "IL": band_il},
         "buy_lists": result["buy_lists"],
     }
-    saved_path = _save_json(state2, data_dir, "lotto_phase2")
-    result["saved_path"] = saved_path
+    result["saved_path"] = _save_json(state2, data_dir, "lotto_phase2")
     result["note"] = "Use saved_path for Phase 3 confirmation after the next official draw."
-
     return result
 
 def list_recent(data_dir: str) -> Dict:
@@ -545,8 +440,7 @@ def _parse_nwj_blob(nwj: Dict) -> Dict:
         return out
     def conv_pair(v):
         if isinstance(v, list) and len(v) == 2:
-            mains = v[0]; bonus = v[1]
-            return (mains, bonus)
+            return (v[0], v[1])
         return None
     for k in ("LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"):
         if k in nwj:
@@ -606,12 +500,5 @@ def handle_confirm(payload: Dict, data_dir: str) -> Dict:
     il_m1 = eval_il(buys_il, latest["IL_M1"])
     il_m2 = eval_il(buys_il, latest["IL_M2"])
 
-    return {
-        "ok": True,
-        "phase": "phase3",
-        "confirm_hits": {
-            "MM": mm_stats,
-            "PB": pb_stats,
-            "IL": {"JP": il_jp, "M1": il_m1, "M2": il_m2}
-        }
-    }
+    return {"ok": True, "phase": "phase3",
+            "confirm_hits": {"MM": mm_stats, "PB": pb_stats, "IL": {"JP": il_jp, "M1": il_m1, "M2": il_m2}}}
