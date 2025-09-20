@@ -1,6 +1,4 @@
-# lottery_core.py
-# Minimal-but-complete core engine for Lottery Optimizer (MM/PB/IL)
-# Works with app.py scaffold routes: handle_run / handle_confirm / list_recent
+# lottery_core.py — core engine with batch details
 
 from __future__ import annotations
 import json, os, re, random, datetime
@@ -27,7 +25,6 @@ PATTERNS_MM_PB = [
     ("LRR", {"H":0, "O":1, "U":3}), ("LRR", {"H":0, "O":2, "U":2}),
     ("LRR", {"H":0, "O":3, "U":1}),
 ]
-
 PATTERNS_IL = [
     ("VIP", {"H":1, "O":0, "U":4}), ("VIP", {"H":1, "O":1, "U":3}),
     ("VIP", {"H":1, "O":2, "U":2}), ("VIP", {"H":1, "O":3, "U":1}),
@@ -61,24 +58,19 @@ def _save_json(obj, data_dir: str, prefix: str) -> str:
         json.dump(obj, f, indent=2)
     return path
 
-# ---------------------------- Parsing inputs ----------------------------- #
+# ---------- parse helpers ----------
 
 def parse_latest_pair(s: str) -> Tuple[List[int], Optional[int]]:
     s = (s or "").strip()
-    if not s:
-        raise ValueError("LATEST_* is empty")
+    if not s: raise ValueError("LATEST_* is empty")
     m = re.search(r"\[([0-9,\s]+)\]", s)
-    if not m:
-        raise ValueError(f"Bad LATEST format: {s}")
+    if not m: raise ValueError(f"Bad LATEST format: {s}")
     mains = [int(x) for x in m.group(1).replace(" ", "").split(",") if x]
     rest = s[m.end():].strip().lstrip(",").strip()
     bonus = None
     if rest:
         rest = rest.split()[0]
-        if rest.lower().startswith("none"):
-            bonus = None
-        else:
-            bonus = int(re.sub(r"[^0-9]", "", rest) or "0")
+        bonus = None if rest.lower().startswith("none") else int(re.sub(r"[^0-9]", "", rest) or "0")
     return mains, bonus
 
 def parse_hist_blob_mm(s: str) -> List[Tuple[List[int], int]]:
@@ -86,8 +78,7 @@ def parse_hist_blob_mm(s: str) -> List[Tuple[List[int], int]]:
     out = []
     for ln in lines:
         m = re.match(r"([0-9\-]+)\s+([0-9]+)", ln)
-        if not m:
-            continue
+        if not m: continue
         mains = [int(x) for x in m.group(1).split("-")]
         b = int(m.group(2))
         out.append((sorted(mains), b))
@@ -104,19 +95,11 @@ def parse_hist_blob_il(s: str) -> List[List[int]]:
     return out[:20]
 
 def parse_feed_mm_pb(s: str) -> Dict[str, List[int]]:
-    """
-    Parse FEED_MM or FEED_PB blocks robustly.
-    We capture the whole line after the colon and then extract ONLY digits via re.findall,
-    so words like 'Mega' or 'Power' are ignored safely.
-    """
     s = s or ""
-
     def find_nums(label_regex: str) -> List[int]:
         m = re.search(label_regex + r"\s*:\s*([^\r\n]+)", s, flags=re.I)
-        if not m:
-            return []
+        if not m: return []
         return [int(x) for x in re.findall(r"\d+", m.group(1))]
-
     hot = find_nums(r"Top\s+8\s+hot\s+numbers")
     overdue = find_nums(r"Top\s+8\s+overdue\s+numbers")
     b_hot = find_nums(r"Top\s+3\s+hot\s+(Mega|Power)\s*Ball\s+numbers")
@@ -124,22 +107,16 @@ def parse_feed_mm_pb(s: str) -> Dict[str, List[int]]:
     return {"hot": hot, "overdue": overdue, "bonus_hot": b_hot, "bonus_overdue": b_over}
 
 def parse_feed_il(s: str) -> Dict[str, List[int]]:
-    """
-    Parse FEED_IL with the same robust digit-only extraction.
-    """
     s = s or ""
-
     def find_nums(label_regex: str) -> List[int]:
         m = re.search(label_regex + r"\s*:\s*([^\r\n]+)", s, flags=re.I)
-        if not m:
-            return []
+        if not m: return []
         return [int(x) for x in re.findall(r"\d+", m.group(1))]
-
     hot = find_nums(r"Top\s+8\s+hot\s+numbers")
     overdue = find_nums(r"Top\s+8\s+overdue\s+numbers")
     return {"hot": hot, "overdue": overdue}
 
-# ----------------------------- Feature sets ------------------------------ #
+# ---------- feature sets ----------
 
 def compute_vip(hot: List[int], overdue: List[int]) -> List[int]:
     return sorted(list(set(hot).intersection(overdue)))
@@ -149,8 +126,7 @@ def compute_lrr(main_lists: List[List[int]]) -> List[int]:
     flat = [n for row in main_lists for n in row]
     c = Counter(flat)
     last5 = set(n for row in main_lists[:5] for n in row)
-    candidates = [n for n, cnt in c.items() if cnt == 2 and n not in last5]
-    return sorted(candidates)
+    return sorted([n for n, cnt in c.items() if cnt == 2 and n not in last5])
 
 def compute_undrawn(main_lists: List[List[int]], universe_max: int, last_k: int = 10) -> List[int]:
     recent = set(n for row in main_lists[:last_k] for n in row)
@@ -159,14 +135,24 @@ def compute_undrawn(main_lists: List[List[int]], universe_max: int, last_k: int 
 
 def middle50_from_hist(main_lists: List[List[int]], fallback: Tuple[int,int]) -> Tuple[int,int]:
     sums = [sum(row) for row in main_lists]
-    if len(sums) < 8:
-        return fallback
+    if len(sums) < 8: return fallback
     sums_sorted = sorted(sums)
     q1 = sums_sorted[len(sums_sorted)//4]
     q3 = sums_sorted[(3*len(sums_sorted))//4]
     return (q1, q3)
 
-# --------------------------- Pool generation ----------------------------- #
+def _hist_mains_only_mm(hist_mm: List[Tuple[List[int], int]]) -> List[List[int]]:
+    return [row for (row, _) in hist_mm]
+
+def middle_band(game: str, hist_mains: List[List[int]]) -> Tuple[int,int]:
+    base = DEFAULT_SUM_BANDS[game]
+    try:
+        q1, q3 = middle50_from_hist(hist_mains, base)
+        return (q1, q3) if q1 < q3 else base
+    except Exception:
+        return base
+
+# ---------- generation ----------
 
 def _choose_from(pool: List[int], k: int, exclude: set) -> List[int]:
     cand = [x for x in pool if x not in exclude]
@@ -177,9 +163,7 @@ def _gen_ticket_with_pattern(game: str, pattern_anchor: str, pattern_counts: Dic
                              pools: Dict[str,List[int]], lrr_rotation: List[int],
                              vip_rotation: List[int], sum_band: Tuple[int,int]) -> Tuple[List[int], Optional[int]]:
     spec = GAME_SPECS[game]
-    need = spec["main_n"]
-    chosen = []
-    used = set()
+    need = spec["main_n"]; chosen = []; used = set()
 
     anchor_list = vip_rotation if (pattern_anchor == "VIP" and vip_rotation) else lrr_rotation
     if anchor_list:
@@ -189,8 +173,7 @@ def _gen_ticket_with_pattern(game: str, pattern_anchor: str, pattern_counts: Dic
     for key, pool_key in [("H","hot"), ("O","overdue"), ("U","undrawn")]:
         cnt = pattern_counts.get(key, 0)
         if cnt <= 0: continue
-        pick = _choose_from(pools.get(pool_key, []), cnt, used)
-        for n in pick:
+        for n in _choose_from(pools.get(pool_key, []), cnt, used):
             if n not in used:
                 chosen.append(n); used.add(n)
 
@@ -208,8 +191,8 @@ def _gen_ticket_with_pattern(game: str, pattern_anchor: str, pattern_counts: Dic
 
     mains = sorted(chosen[:need])
 
-    s = sum(mains); lo, hi = sum_band
-    if not (lo <= s <= hi):
+    lo, hi = sum_band
+    if not (lo <= sum(mains) <= hi):
         RNG.shuffle(union)
         fill = []
         for n in union:
@@ -222,8 +205,7 @@ def _gen_ticket_with_pattern(game: str, pattern_anchor: str, pattern_counts: Dic
 
     bonus = None
     if spec["bonus_max"]:
-        b_hot = pools.get("bonus_hot", []); b_over = pools.get("bonus_overdue", [])
-        b_pool = b_hot + b_over if (b_hot or b_over) else list(range(1, spec["bonus_max"]+1))
+        b_pool = (pools.get("bonus_hot", []) + pools.get("bonus_overdue", [])) or list(range(1, spec["bonus_max"]+1))
         bonus = RNG.choice(b_pool)
 
     return mains, bonus
@@ -236,44 +218,40 @@ def build_50_pool(game: str, pools: Dict[str,List[int]], sum_band: Tuple[int,int
     idx = 0; guard = 0
     while len(out) < 50 and guard < 1000:
         pa, pc = patterns[idx % len(patterns)]
-        mains, bonus = _gen_ticket_with_pattern(game, pa, pc, pools, lrr_rotation, vip_rotation, sum_band)
-        out.append((mains, bonus))
+        out.append(_gen_ticket_with_pattern(game, pa, pc, pools, lrr_rotation, vip_rotation, sum_band))
         idx += 1; guard += 1
     return out
 
-# ------------------------------- Matching -------------------------------- #
+# ---------- annotate (for detailed tables) ----------
 
-def match_stats_mm_pb(pool: List[Tuple[List[int], int]], latest: Tuple[List[int], int]) -> Dict:
-    target_mains, target_bonus = latest
-    res = {"3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []}
+def _annotate_mm_pb(pool, latest_pair):
+    target_mains, target_bonus = latest_pair
+    stats = {"3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []}
+    rows = []
+    tset = set(target_mains)
     for i, (mains, bonus) in enumerate(pool, start=1):
-        hit = len(set(mains).intersection(target_mains))
+        hit = len(set(mains).intersection(tset))
         hasB = (bonus == target_bonus)
-        if hit == 3: (res["3B"] if hasB else res["3"]).append(i)
-        elif hit == 4: (res["4B"] if hasB else res["4"]).append(i)
-        elif hit == 5: (res["5B"] if hasB else res["5"]).append(i)
-    return res
+        label = None
+        if hit == 3: label = "3B" if hasB else "3"
+        elif hit == 4: label = "4B" if hasB else "4"
+        elif hit == 5: label = "5B" if hasB else "5"
+        if label: stats[label].append(i)
+        rows.append({"row": i, "mains": mains, "bonus": bonus, "sum": sum(mains), "hit": label})
+    return rows, stats
 
-def match_stats_il(pool: List[Tuple[List[int], None]], latest: List[int]) -> Dict:
-    res = {"3": [], "4": [], "5": [], "6": []}
-    for i, (mains, _) in enumerate(pool, start=1):
-        hit = len(set(mains).intersection(latest))
-        if hit in res:
-            res[str(hit)].append(i)
-    return res
+def _annotate_il(pool, latest_mains):
+    tset = set(latest_mains)
+    stats = {"3": [], "4": [], "5": [], "6": []}
+    rows = []
+    for i, (mains, _none) in enumerate(pool, start=1):
+        hit = len(set(mains).intersection(tset))
+        label = str(hit) if hit in (3,4,5,6) else None
+        if label: stats[label].append(i)
+        rows.append({"row": i, "mains": mains, "bonus": None, "sum": sum(mains), "hit": label})
+    return rows, stats
 
-# ------------------------------- Phases ---------------------------------- #
-
-def _hist_mains_only_mm(hist_mm: List[Tuple[List[int], int]]) -> List[List[int]]:
-    return [row for (row, _) in hist_mm]
-
-def middle_band(game: str, hist_mains: List[List[int]]) -> Tuple[int,int]:
-    base = DEFAULT_SUM_BANDS[game]
-    try:
-        q1, q3 = middle50_from_hist(hist_mains, base)
-        return (q1, q3) if q1 < q3 else base
-    except Exception:
-        return base
+# ---------- phases ----------
 
 def _pools_for_game(game: str, feed_hot: List[int], feed_over: List[int], hist_mains: List[List[int]],
                     bonus_hot: List[int] = None, bonus_over: List[int] = None) -> Dict[str,List[int]]:
@@ -288,31 +266,29 @@ def _pools_for_game(game: str, feed_hot: List[int], feed_over: List[int], hist_m
         "vip": [n for n in vip if 1 <= n <= spec["main_max"]],
         "lrr": [n for n in lrr if 1 <= n <= spec["main_max"]],
     }
-    if spec["bonus_max"]:
-        pools["bonus_hot"] = [n for n in (bonus_hot or []) if 1 <= n <= spec["bonus_max"]]
-        pools["bonus_overdue"] = [n for n in (bonus_over or []) if 1 <= n <= spec["bonus_max"]]
+    if GAME_SPECS[game]["bonus_max"]:
+        pools["bonus_hot"] = [n for n in (bonus_hot or []) if 1 <= n <= GAME_SPECS[game]["bonus_max"]]
+        pools["bonus_overdue"] = [n for n in (bonus_over or []) if 1 <= n <= GAME_SPECS[game]["bonus_max"]]
     return pools
 
 def handle_run(payload: Dict, data_dir: str) -> Dict:
     phase = (payload.get("phase") or "").lower()
     if phase == "phase2":
         saved_path = payload.get("saved_path") or ""
-        if not saved_path:
-            raise ValueError("phase2 requires saved_path")
+        if not saved_path: raise ValueError("phase2 requires saved_path")
         with open(saved_path, "r", encoding="utf-8") as f:
             state = json.load(f)
         return _run_phase2(state, data_dir)
 
+    # Phase 1 inputs
     mm_latest = parse_latest_pair(payload.get("LATEST_MM",""))
     pb_latest = parse_latest_pair(payload.get("LATEST_PB",""))
     il_jp = parse_latest_pair(payload.get("LATEST_IL_JP",""))[0]
     il_m1 = parse_latest_pair(payload.get("LATEST_IL_M1",""))[0]
     il_m2 = parse_latest_pair(payload.get("LATEST_IL_M2",""))[0]
-
     f_mm = parse_feed_mm_pb(payload.get("FEED_MM",""))
     f_pb = parse_feed_mm_pb(payload.get("FEED_PB",""))
     f_il = parse_feed_il(payload.get("FEED_IL",""))
-
     hist_mm = parse_hist_blob_mm(payload.get("HIST_MM_BLOB",""))
     hist_pb = parse_hist_blob_mm(payload.get("HIST_PB_BLOB",""))
     hist_il = parse_hist_blob_il(payload.get("HIST_IL_BLOB",""))
@@ -325,15 +301,15 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb), f_pb["bonus_hot"], f_pb["bonus_overdue"])
     pools_il = _pools_for_game("IL", f_il["hot"], f_il["overdue"], hist_il)
 
+    # Generate + annotate
     pool_mm = build_50_pool("MM", pools_mm, band_mm)
     pool_pb = build_50_pool("PB", pools_pb, band_pb)
     pool_il = build_50_pool("IL", pools_il, band_il)
-
-    stats_mm = match_stats_mm_pb(pool_mm, mm_latest)
-    stats_pb = match_stats_mm_pb(pool_pb, pb_latest)
-    stats_il_jp = match_stats_il(pool_il, il_jp)
-    stats_il_m1 = match_stats_il(pool_il, il_m1)
-    stats_il_m2 = match_stats_il(pool_il, il_m2)
+    rows_mm, stats_mm = _annotate_mm_pb(pool_mm, mm_latest)
+    rows_pb, stats_pb = _annotate_mm_pb(pool_pb, pb_latest)
+    rows_il_jp, stats_il_jp = _annotate_il(pool_il, il_jp)
+    rows_il_m1, stats_il_m1 = _annotate_il(pool_il, il_m1)
+    rows_il_m2, stats_il_m2 = _annotate_il(pool_il, il_m2)
 
     state = {
         "created_at": _nowstamp(), "phase": "phase1",
@@ -346,18 +322,26 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     saved_path = _save_json(state, data_dir, "lotto_phase1")
 
     return {
-        "ok": True, "saved_path": saved_path,
+        "ok": True,
+        "saved_path": saved_path,
         "bands": {"MM": band_mm, "PB": band_pb, "IL": band_il},
-        "eval_vs_NJ": {"MM": stats_mm, "PB": stats_pb, "IL": {"JP": stats_il_jp, "M1": stats_il_m1, "M2": stats_il_m2}},
+        "eval_vs_NJ": {
+            "MM": stats_mm, "PB": stats_pb,
+            "IL": {"JP": stats_il_jp, "M1": stats_il_m1, "M2": stats_il_m2}
+        },
+        "batches": {
+            "MM": rows_mm,
+            "PB": rows_pb,
+            "IL": {"JP": rows_il_jp, "M1": rows_il_m1, "M2": rows_il_m2}
+        },
         "note": "Use saved_path for Phase 2."
     }
 
 def _promote_newest_into_history(state: Dict) -> Dict:
     latest = state["latest"]; hist = state["history"]
-    mm_latest = (sorted(latest["MM"][0]), int(latest["MM"][1]))
-    pb_latest = (sorted(latest["PB"][0]), int(latest["PB"][1]))
-    il_latest = sorted(latest["IL_JP"])
-    hist["MM"] = [mm_latest] + hist["MM"]; hist["PB"] = [pb_latest] + hist["PB"]; hist["IL"] = [il_latest] + hist["IL"]
+    hist["MM"] = [(sorted(latest["MM"][0]), int(latest["MM"][1]))] + hist["MM"]
+    hist["PB"] = [(sorted(latest["PB"][0]), int(latest["PB"][1]))] + hist["PB"]
+    hist["IL"] = [sorted(latest["IL_JP"])] + hist["IL"]
     hist["MM"] = hist["MM"][:20]; hist["PB"] = hist["PB"][:20]; hist["IL"] = hist["IL"][:20]
     return state
 
@@ -369,11 +353,9 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
     state = _promote_newest_into_history(state)
     hist_mm = state["history"]["MM"]; hist_pb = state["history"]["PB"]; hist_il = state["history"]["IL"]
     f_mm = state["pools"]["MM"]; f_pb = state["pools"]["PB"]; f_il = state["pools"]["IL"]
-
     band_mm = middle_band("MM", _hist_mains_only_mm(hist_mm))
     band_pb = middle_band("PB", _hist_mains_only_mm(hist_pb))
     band_il = middle_band("IL", hist_il)
-
     pools_mm = _pools_for_game("MM", f_mm["hot"], f_mm["overdue"], _hist_mains_only_mm(hist_mm), f_mm.get("bonus_hot",[]), f_mm.get("bonus_overdue",[]))
     pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb), f_pb.get("bonus_hot",[]), f_pb.get("bonus_overdue",[]))
     pools_il = _pools_for_game("IL", f_il["hot"], f_il["overdue"], hist_il)
@@ -388,7 +370,6 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
     agg_il = {"JP":{"3":[], "4":[], "5":[], "6":[]},
               "M1":{"3":[], "4":[], "5":[], "6":[]},
               "M2":{"3":[], "4":[], "5":[], "6":[]}}
-
     freq_mm = {}; freq_pb = {}; freq_il = {}
 
     for _ in range(runs):
@@ -396,20 +377,21 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
         pool_pb = build_50_pool("PB", pools_pb, band_pb)
         pool_il = build_50_pool("IL", pools_il, band_il)
 
-        _aggregate_hits(agg_mm, match_stats_mm_pb(pool_mm, mm_latest))
-        _aggregate_hits(agg_pb, match_stats_mm_pb(pool_pb, pb_latest))
-        il_stats_jp = match_stats_il(pool_il, il_jp)
-        il_stats_m1 = match_stats_il(pool_il, il_m1)
-        il_stats_m2 = match_stats_il(pool_il, il_m2)
-        for k in ("3","4","5","6"):
-            agg_il["JP"][k].extend(il_stats_jp.get(k,[]))
-            agg_il["M1"][k].extend(il_stats_m1.get(k,[]))
-            agg_il["M2"][k].extend(il_stats_m2.get(k,[]))
-
-        def bump(d, ticket): d[ticket] = d.get(ticket, 0) + 1
+        def bump(d, t): d[t] = d.get(t, 0) + 1
         for t in pool_mm: bump(freq_mm, (tuple(t[0]), t[1]))
         for t in pool_pb: bump(freq_pb, (tuple(t[0]), t[1]))
         for t in pool_il: bump(freq_il, (tuple(t[0]), None))
+
+        from copy import deepcopy
+        _, s_mm = _annotate_mm_pb(pool_mm, mm_latest); _aggregate_hits(agg_mm, s_mm)
+        _, s_pb = _annotate_mm_pb(pool_pb, pb_latest); _aggregate_hits(agg_pb, s_pb)
+        _, s_il_jp = _annotate_il(pool_il, il_jp)
+        _, s_il_m1 = _annotate_il(pool_il, il_m1)
+        _, s_il_m2 = _annotate_il(pool_il, il_m2)
+        for k in ("3","4","5","6"):
+            agg_il["JP"][k].extend(s_il_jp.get(k,[]))
+            agg_il["M1"][k].extend(s_il_m1.get(k,[]))
+            agg_il["M2"][k].extend(s_il_m2.get(k,[]))
 
     def top_list(freq_map, n):
         items = sorted(freq_map.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -420,7 +402,9 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
             if len(out) >= n: break
         return out
 
-    buy_mm = top_list(freq_mm, 10); buy_pb = top_list(freq_pb, 10); buy_il = top_list(freq_il, 15)
+    buy_mm = top_list(freq_mm, 10)
+    buy_pb = top_list(freq_pb, 10)
+    buy_il = top_list(freq_il, 15)
 
     result = {
         "ok": True, "phase": "phase2",
@@ -428,7 +412,6 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
         "agg_hits": {"MM": agg_mm, "PB": agg_pb, "IL": agg_il},
         "buy_lists": {"MM": buy_mm, "PB": buy_pb, "IL": buy_il},
     }
-
     state2 = {
         "created_at": _nowstamp(), "phase": "phase2",
         "history": state["history"], "latest": state["latest"],
@@ -450,21 +433,18 @@ def list_recent(data_dir: str) -> Dict:
 
 def _parse_nwj_blob(nwj: Dict) -> Dict:
     out = {}
-    if not isinstance(nwj, dict):
-        return out
+    if not isinstance(nwj, dict): return out
     def conv_pair(v):
         if isinstance(v, list) and len(v) == 2:
             return (v[0], v[1])
         return None
     for k in ("LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"):
-        if k in nwj:
-            out[k] = conv_pair(nwj[k])
+        if k in nwj: out[k] = conv_pair(nwj[k])
     return out
 
 def handle_confirm(payload: Dict, data_dir: str) -> Dict:
     saved_path = payload.get("saved_path") or ""
-    if not saved_path:
-        raise ValueError("confirm requires saved_path")
+    if not saved_path: raise ValueError("confirm requires saved_path")
     with open(saved_path, "r", encoding="utf-8") as f:
         state2 = json.load(f)
 
@@ -506,8 +486,7 @@ def handle_confirm(payload: Dict, data_dir: str) -> Dict:
         for i, (m, _) in enumerate(buys, start=1):
             hit = len(set(m).intersection(latest_mains))
             key = str(hit)
-            if key in out:
-                out[key].append(i)
+            if key in out: out[key].append(i)
         return out
 
     il_jp = eval_il(buys_il, latest["IL_JP"])
