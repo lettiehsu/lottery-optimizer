@@ -1,4 +1,4 @@
-/* static/app.js — nicer, structured outputs */
+/* static/app.js — clean outputs with 50-row tables */
 
 async function postJSON(url, data) {
   const res = await fetch(url, {
@@ -9,8 +9,6 @@ async function postJSON(url, data) {
   const txt = await res.text();
   try { return JSON.parse(txt); } catch { return { ok:false, raw: txt }; }
 }
-
-/* ---------- helpers to render clean cards/tables ---------- */
 
 function el(tag, cls, html) {
   const n = document.createElement(tag);
@@ -23,7 +21,6 @@ function copyBtn(text) {
   b.onclick = () => { navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(()=>b.textContent="Copy",1200); };
   return b;
 }
-
 function pill(x){ return `<span class="pill">${x}</span>`; }
 
 function renderBands(bands) {
@@ -36,57 +33,67 @@ function renderBands(bands) {
   }
   return wrap;
 }
-
 function renderHitPositions(title, hitsObj, withBonus=false) {
-  // hitsObj shape: {"3":[...], "3B":[...], "4":[...], ...}
   const c = el("div","card");
   c.append(el("h3","",title));
-  const tbl = el("table","tbl");
-  const header = el("tr");
   const cols = withBonus ? ["3","3B","4","4B","5","5B"] : ["3","4","5","6"];
-  header.innerHTML = `<th>Type</th>${cols.map(k=>`<th>${k}</th>`).join("")}`;
-  const thead = el("thead"); thead.append(header);
+  const tbl = el("table","tbl");
+  const thead = el("thead"); thead.innerHTML = `<tr><th>Type</th>${cols.map(k=>`<th>${k}</th>`).join("")}</tr>`;
   const tbody = el("tbody");
   const row = el("tr");
   row.innerHTML = `<td class="muted">Positions</td>` + cols.map(k=>{
     const arr = hitsObj?.[k] || [];
     return `<td>${arr.length ? arr.map(pill).join(" ") : `<span class="muted">—</span>`}</td>`;
   }).join("");
-  tbody.append(row);
-  tbl.append(thead, tbody);
-  c.append(tbl);
-  return c;
+  tbody.append(row); tbl.append(thead, tbody); c.append(tbl); return c;
 }
-
 function renderBuyList(title, list) {
-  const c = el("div","card");
-  c.append(el("h3","",title));
+  const c = el("div","card"); c.append(el("h3","",title));
   const tbl = el("table","tbl");
-  const thead = el("thead");
-  thead.innerHTML = `<tr><th>#</th><th>Mains</th><th>Bonus</th></tr>`;
-  const tbody = el("tbody");
+  tbl.innerHTML = `<thead><tr><th>#</th><th>Mains</th><th>Bonus</th></tr></thead><tbody></tbody>`;
+  const tb = tbl.querySelector("tbody");
   (list||[]).forEach((t,i)=>{
-    const mains = (t.mains||[]).join(", ");
-    const bonus = (t.bonus==null? "—" : t.bonus);
     const tr = el("tr");
-    tr.innerHTML = `<td>${i+1}</td><td class="mono">${mains}</td><td class="mono">${bonus}</td>`;
-    tbody.append(tr);
+    tr.innerHTML = `<td>${i+1}</td><td class="mono">${(t.mains||[]).join(", ")}</td><td class="mono">${t.bonus==null?"—":t.bonus}</td>`;
+    tb.append(tr);
   });
-  tbl.append(thead, tbody);
-  c.append(tbl);
-  return c;
+  c.append(tbl); return c;
 }
 
-function renderRaw(jsonObj, title="Raw response") {
+/* ----- NEW: detailed batch tables ----- */
+function renderBatchTableMM(title, rows) {
+  const c = el("div","card"); c.append(el("h3","",title));
+  const tbl = el("table","tbl");
+  tbl.innerHTML = `<thead><tr><th>#</th><th>Mains</th><th>Bonus</th><th>Sum</th><th>Hit</th></tr></thead><tbody></tbody>`;
+  const tb = tbl.querySelector("tbody");
+  (rows||[]).forEach(r=>{
+    const tr = el("tr");
+    tr.innerHTML = `<td>${r.row}</td><td class="mono">${(r.mains||[]).join(", ")}</td><td class="mono">${r.bonus==null?"—":r.bonus}</td><td class="mono">${r.sum}</td><td>${r.hit?`<span class="pill">${r.hit}</span>`:'<span class="muted">—</span>'}</td>`;
+    tb.append(tr);
+  });
+  c.append(tbl); return c;
+}
+function renderBatchTableIL(title, rows) {
+  const c = el("div","card"); c.append(el("h3","",title));
+  const tbl = el("table","tbl");
+  tbl.innerHTML = `<thead><tr><th>#</th><th>Mains</th><th>Sum</th><th>Hit</th></tr></thead><tbody></tbody>`;
+  const tb = tbl.querySelector("tbody");
+  (rows||[]).forEach(r=>{
+    const tr = el("tr");
+    tr.innerHTML = `<td>${r.row}</td><td class="mono">${(r.mains||[]).join(", ")}</td><td class="mono">${r.sum}</td><td>${r.hit?`<span class="pill">${r.hit}</span>`:'<span class="muted">—</span>'}</td>`;
+    tb.append(tr);
+  });
+  c.append(tbl); return c;
+}
+
+function renderRaw(jsonObj, title="Raw JSON (for debugging)") {
   const card = el("div","card");
-  const h = el("h3","",title);
-  const pre = el("pre","raw", JSON.stringify(jsonObj, null, 2));
-  card.append(h, pre);
+  card.append(el("h3","",title));
+  card.append(el("pre","raw", JSON.stringify(jsonObj, null, 2)));
   return card;
 }
 
 /* ---------- Phase 1 ---------- */
-
 async function runPhase1() {
   const payload = {
     LATEST_MM: document.querySelector("#p1_mm").value.trim(),
@@ -115,10 +122,7 @@ async function runPhase1() {
     return;
   }
 
-  // Bands
   out.append(renderBands(data.bands));
-
-  // Hits per game
   const hits = data.eval_vs_NJ || {};
   const cards = el("div","cards");
   cards.append(renderHitPositions("MM hits vs NJ", hits.MM, true));
@@ -129,30 +133,39 @@ async function runPhase1() {
   cards.append(renderHitPositions("IL Million 2 (6) vs NJ", il.M2, false));
   out.append(cards);
 
-  // Saved path
+  /* detailed batches */
+  if (data.batches) {
+    const B = data.batches;
+    const wrap = el("div","cards");
+    if (Array.isArray(B.MM)) wrap.append(renderBatchTableMM("MM — 50-row batch", B.MM));
+    if (Array.isArray(B.PB)) wrap.append(renderBatchTableMM("PB — 50-row batch", B.PB));
+    if (B.IL) {
+      wrap.append(renderBatchTableIL("IL JP — 50-row batch", B.IL.JP || []));
+      wrap.append(renderBatchTableIL("IL M1 — 50-row batch", B.IL.M1 || []));
+      wrap.append(renderBatchTableIL("IL M2 — 50-row batch", B.IL.M2 || []));
+    }
+    out.append(wrap);
+  }
+
   if (data.saved_path) {
     const p = el("div","okline", `Saved Phase-1 state: <span class="mono">${data.saved_path}</span>`);
     p.appendChild(copyBtn(data.saved_path));
     out.append(p);
   }
-
-  // Raw (collapsible feel)
-  out.append(renderRaw(data, "Raw JSON (for debugging)"));
+  out.append(renderRaw(data));
   btn.disabled = false; btn.textContent = "Run Phase 1";
 }
 
 /* ---------- Phase 2 ---------- */
-
 async function runPhase2() {
   const saved = document.querySelector("#p2_saved").value.trim();
   if (!saved) { alert("Paste the Phase-1 saved_path first."); return; }
-
   const payload = { phase: "phase2", saved_path: saved };
   const btn = document.querySelector("#btn_p2");
   btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p2"); out.innerHTML = "";
-
   const data = await postJSON("/run_json", payload);
+
   if (!data || data.error) {
     out.append(el("div","danger", `Error: ${data?.error || "unknown"}`));
     if (data?.detail) out.append(el("pre","raw", data.detail));
@@ -160,10 +173,7 @@ async function runPhase2() {
     return;
   }
 
-  // Bands
   out.append(renderBands(data.bands));
-
-  // Buy lists
   const buys = data.buy_lists || {};
   const cards = el("div","cards");
   cards.append(renderBuyList("MM — 10 tickets", buys.MM));
@@ -176,29 +186,22 @@ async function runPhase2() {
     p.appendChild(copyBtn(data.saved_path));
     out.append(p);
   }
-
-  out.append(renderRaw(data, "Raw JSON (for debugging)"));
+  out.append(renderRaw(data));
   btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
 }
 
 /* ---------- Phase 3 ---------- */
-
 async function runPhase3() {
   const saved = document.querySelector("#p3_saved").value.trim();
   if (!saved) { alert("Paste the Phase-2 saved_path first."); return; }
-
-  let nwj;
-  try { nwj = JSON.parse(document.querySelector("#p3_nwj").value || "{}"); }
-  catch { nwj = null; }
-
-  const payload = { saved_path: saved };
-  if (nwj && Object.keys(nwj).length) payload.NWJ = nwj;
+  let nwj; try { nwj = JSON.parse(document.querySelector("#p3_nwj").value || "{}"); } catch { nwj = null; }
+  const payload = { saved_path: saved }; if (nwj && Object.keys(nwj).length) payload.NWJ = nwj;
 
   const btn = document.querySelector("#btn_p3");
   btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p3"); out.innerHTML = "";
-
   const data = await postJSON("/confirm_json", payload);
+
   if (!data || data.error) {
     out.append(el("div","danger", `Error: ${data?.error || "unknown"}`));
     if (data?.detail) out.append(el("pre","raw", data.detail));
@@ -216,12 +219,11 @@ async function runPhase3() {
   cards.append(renderHitPositions("IL M2 — buy list vs NWJ", il.M2, false));
   out.append(cards);
 
-  out.append(renderRaw(data, "Raw JSON (for debugging)"));
+  out.append(renderRaw(data));
   btn.disabled = false; btn.textContent = "Confirm vs NWJ";
 }
 
 /* ---------- Recent ---------- */
-
 async function getRecent() {
   const out = document.querySelector("#out_recent"); out.innerHTML = "";
   const res = await fetch("/recent"); const data = await res.json();
@@ -236,8 +238,6 @@ async function getRecent() {
   });
   out.append(list);
 }
-
-/* ---------- wire up ---------- */
 
 document.querySelector("#btn_p1").addEventListener("click", runPhase1);
 document.querySelector("#btn_p2").addEventListener("click", runPhase2);
