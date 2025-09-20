@@ -1,16 +1,14 @@
-# app.py
+# app.py — top of file (order matters!)
 from __future__ import annotations
 import os, glob, json, traceback, ast
 from datetime import datetime
 from typing import Any, Dict, Tuple, List, Optional
 from flask import Flask, render_template, request, jsonify
 
-# ───────────────────────────────────────────────────────────────────────────────
-# App setup
-# ───────────────────────────────────────────────────────────────────────────────
+# 1) Create the app FIRST
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
-# Jinja filters used by report.html
+# 2) Jinja filters
 @app.template_filter("rjust")
 def rjust_filter(value, width=0, fillchar=" "):
     s = "" if value is None else str(value)
@@ -25,16 +23,18 @@ def rjust_filter(value, width=0, fillchar=" "):
 def pad2_filter(value):
     return ("" if value is None else str(value)).rjust(2, "0")
 
-# Global error handler (pretty JSON for API routes)
+# 3) Global error handler (now safe because app exists)
 @app.errorhandler(Exception)
 def handle_any_error(e):
     tb = traceback.format_exc()
-    # Log to Render logs
+    # Log for Render
     print("UNCAUGHT ERROR:", e)
     print(tb)
+    # JSON for our XHR routes
     if request.path in ("/run", "/confirm", "/recent"):
         return jsonify({"ok": False, "error": f"{e.__class__.__name__}: {e}\n{tb}"}), 500
-    return f"Template rendering error.\n\nTRACEBACK:\n{tb}\n\nRES:\nNone\n\nORIGINAL ERROR:\nNone", 500
+    # Plain text for others
+    return f"ERROR: {e}\n\n{tb}", 500
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Import your core logic safely
