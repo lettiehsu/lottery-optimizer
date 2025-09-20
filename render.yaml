@@ -1,16 +1,1 @@
-services:
-  - type: web
-    name: lottery-optimizer
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -c gunicorn.conf.py app:app
-    envVars:
-      - key: FLASK_ENV
-        value: production
-      - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: SECRET_KEY
-        generateValue: true
-    healthCheckPath: /health
-    autoDeploy: true
+startCommand: python app.py
