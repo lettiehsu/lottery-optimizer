@@ -6,7 +6,6 @@
   <title>Lottery Optimizer</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
-    /* minimal extras for cleaner results */
     .section { background:#0f172a; border:1px solid #16213e; border-radius:14px; padding:16px; margin:18px 0; }
     .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:none; background:#3b82f6; color:#fff; font-weight:600; cursor:pointer; }
     .btn.secondary { background:#0ea5e9; }
@@ -17,19 +16,16 @@
     input, textarea { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #233; background:#0b1220; color:#e5e7eb; }
     h1 { color:#e5e7eb; margin:22px 0 12px; }
     h2 { color:#e5e7eb; margin:8px 0 16px; font-size:18px; }
-    .note { color:#94a3b8; font-size:13px; }
-    /* results */
+    .muted { color:#94a3b8; font-size:13px; }
     .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; margin-top:12px; }
     .card { background:#0b1220; border:1px solid #1f2937; border-radius:12px; padding:12px; }
     .card h3 { margin:0 0 6px; color:#e5e7eb; font-size:16px; }
-    .kv { display:flex; justify-content:space-between; padding:4px 0; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color:#cbd5e1;}
-    .mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .kv { display:flex; justify-content:space-between; padding:4px 0; font-family:ui-monospace,Menlo,Consolas,monospace; color:#cbd5e1;}
+    .mono { font-family:ui-monospace, Menlo, Consolas, monospace; }
     table.tbl { width:100%; border-collapse:collapse; font-family:ui-monospace, Menlo, Consolas, monospace; }
     .tbl th, .tbl td { border-bottom:1px dashed #243047; padding:6px 8px; text-align:left; color:#cbd5e1;}
     .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#111827; border:1px solid #233; margin:2px 2px 0 0; }
-    .muted { color:#94a3b8; }
     .okline { margin:8px 0; color:#a7f3d0; }
-    .danger { color:#fca5a5; }
     .copy { margin-left:8px; font-size:12px; background:#111827; border:1px solid #334155; color:#e5e7eb; padding:4px 8px; border-radius:8px; cursor:pointer; }
     pre.raw { white-space:pre-wrap; word-break:break-word; background:#0b1220; border:1px dashed #243047; padding:10px; border-radius:10px; color:#9ca3af; }
   </style>
@@ -38,8 +34,7 @@
   <h1>Lottery Optimizer</h1>
   <div class="muted">Phase 1 evaluates vs the new jackpot (NJ). Phase 2 runs 100×50 batches to build buy lists. Phase 3 confirms buy lists vs the newest winning jackpot (NWJ).</div>
 
-  <!-- Phase 1 -->
-  <div class="section" id="sec1">
+  <div class="section">
     <h2>Phase 1 — Evaluation</h2>
     <div class="row">
       <div class="col">
@@ -56,7 +51,7 @@
       </div>
 
       <div class="col">
-        <label>FEED_MM (paste the 8 hot/overdue + 3 MB hot/overdue)</label>
+        <label>FEED_MM</label>
         <textarea id="p1_feed_mm" rows="7" placeholder="Top 8 hot numbers: ..."></textarea>
         <label>FEED_PB</label>
         <textarea id="p1_feed_pb" rows="7" placeholder="Top 8 hot numbers: ..."></textarea>
@@ -80,10 +75,9 @@
     <div id="out_p1" style="margin-top:14px;"></div>
   </div>
 
-  <!-- Phase 2 -->
-  <div class="section" id="sec2">
+  <div class="section">
     <h2>Phase 2 — Prediction</h2>
-    <label>Saved Phase 1 state file (from /run_json response)</label>
+    <label>Saved Phase 1 state file</label>
     <input id="p2_saved" placeholder="/tmp/lotto_phase1_YYYY-MM-DD_HH-MM-SS.json" />
     <div style="margin-top:12px;">
       <button class="btn" id="btn_p2">Run Phase 2 (100×)</button>
@@ -91,12 +85,11 @@
     <div id="out_p2" style="margin-top:14px;"></div>
   </div>
 
-  <!-- Phase 3 -->
-  <div class="section" id="sec3">
+  <div class="section">
     <h2>Phase 3 — Confirmation</h2>
     <label>Saved Phase 2 state file</label>
     <input id="p3_saved" placeholder="/tmp/lotto_phase2_YYYY-MM-DD_HH-MM-SS.json" />
-    <label>NWJ (same format as Phase 1 LATEST_* inputs if changed)</label>
+    <label>NWJ (same format as Phase 1 if changed)</label>
     <textarea id="p3_nwj" rows="5" class="mono">{ "LATEST_MM": [[10,14,34,40,43], 5], "LATEST_PB": [[14,15,32,42,49], 1], "LATEST_IL_JP": [[1,4,5,10,18,49], null], "LATEST_IL_M1": [[6,8,10,18,26,27], null], "LATEST_IL_M2": [[2,18,21,27,43,50], null] }</textarea>
     <div style="margin-top:12px;">
       <button class="btn" id="btn_p3">Confirm vs NWJ</button>
@@ -104,7 +97,6 @@
     <div id="out_p3" style="margin-top:14px;"></div>
   </div>
 
-  <!-- Recent -->
   <div class="section">
     <h2>Recent Files</h2>
     <div id="out_recent"></div>
