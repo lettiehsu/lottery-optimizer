@@ -3,7 +3,7 @@
 # Works with app.py scaffold routes: handle_run / handle_confirm / list_recent
 
 from __future__ import annotations
-import json, os, re, random, time, datetime
+import json, os, re, random, datetime
 from typing import List, Tuple, Dict, Optional
 
 # ---------------------------- Config & helpers ---------------------------- #
@@ -62,7 +62,7 @@ PATTERNS_IL = [
     ("VIP", {"H":5, "O":0, "U":0}),
     ("VIP", {"H":0, "O":1, "U":4}),
     ("VIP", {"H":0, "O":2, "U":3}),
-    ("VIP", {"H":0, "O":3, "U":3}),  # (user typo "3 Undraw" -> keep as 3)
+    ("VIP", {"H":0, "O":3, "U":3}),
     ("VIP", {"H":0, "O":4, "U":1}),
     ("VIP", {"H":0, "O":5, "U":0}),
     ("LRR", {"H":1, "O":0, "U":4}),
@@ -106,16 +106,13 @@ def parse_latest_pair(s: str) -> Tuple[List[int], Optional[int]]:
     s = (s or "").strip()
     if not s:
         raise ValueError("LATEST_* is empty")
-    # Find the list part
     m = re.search(r"\[([0-9,\s]+)\]", s)
     if not m:
         raise ValueError(f"Bad LATEST format: {s}")
     mains = [int(x) for x in m.group(1).replace(" ", "").split(",") if x]
-    # Find trailing bonus, if present
     rest = s[m.end():].strip().lstrip(",").strip()
     bonus = None
     if rest:
-        # could be 'None' or int
         rest = rest.split()[0]
         if rest.lower().startswith("none"):
             bonus = None
@@ -128,7 +125,7 @@ def parse_hist_blob_mm(s: str) -> List[Tuple[List[int], int]]:
     out = []
     for ln in lines:
         m = re.match(r"([0-9\-]+)\s+([0-9]+)", ln)
-        if not m: 
+        if not m:
             continue
         mains = [int(x) for x in m.group(1).split("-")]
         b = int(m.group(2))
@@ -146,14 +143,6 @@ def parse_hist_blob_il(s: str) -> List[List[int]]:
     return out[:20]
 
 def parse_feed_mm_pb(s: str) -> Dict[str, List[int]]:
-    """
-    Parse FEED_MM or FEED_PB block.
-    Returns dict:
-      hot: [...]
-      overdue: [...]
-      bonus_hot: [...]
-      bonus_overdue: [...]
-    """
     s = s or ""
     def find_nums(label: str) -> List[int]:
         m = re.search(label + r"\s*:\s*([0-9,\s]+)", s, flags=re.I)
@@ -181,29 +170,19 @@ def compute_vip(hot: List[int], overdue: List[int]) -> List[int]:
     return sorted(list(set(hot).intersection(overdue)))
 
 def compute_lrr(main_lists: List[List[int]]) -> List[int]:
-    """
-    Numbers that appear exactly twice in the last 20, and NOT repeated in the most recent 5 rows.
-    """
     from collections import Counter
     flat = [n for row in main_lists for n in row]
     c = Counter(flat)
-    last5 = set(n for row in main_lists[:5] for n in row)  # newest first later when we reinsert NJ
+    last5 = set(n for row in main_lists[:5] for n in row)
     candidates = [n for n, cnt in c.items() if cnt == 2 and n not in last5]
     return sorted(candidates)
 
 def compute_undrawn(main_lists: List[List[int]], universe_max: int, last_k: int = 10) -> List[int]:
-    """
-    Undrawn: not appeared in the last `last_k` draws.
-    """
     recent = set(n for row in main_lists[:last_k] for n in row)
     all_nums = set(range(1, universe_max + 1))
     return sorted(list(all_nums - recent))
 
 def middle50_from_hist(main_lists: List[List[int]], fallback: Tuple[int,int]) -> Tuple[int,int]:
-    """
-    Approximate the IQR band from sums of provided history (20 rows).
-    If not enough rows, return fallback.
-    """
     sums = [sum(row) for row in main_lists]
     if len(sums) < 8:
         return fallback
@@ -221,7 +200,7 @@ def _choose_from(pool: List[int], k: int, exclude: set) -> List[int]:
 
 def _gen_ticket_with_pattern(
     game: str,
-    pattern_anchor: str,  # "VIP" or "LRR"
+    pattern_anchor: str,
     pattern_counts: Dict[str,int],
     pools: Dict[str,List[int]],
     lrr_rotation: List[int],
@@ -233,14 +212,12 @@ def _gen_ticket_with_pattern(
     chosen = []
     used = set()
 
-    # anchor
     anchor_list = vip_rotation if (pattern_anchor == "VIP" and vip_rotation) else lrr_rotation
     if anchor_list:
         a = anchor_list.pop(0)
-        anchor_list.append(a)  # rotate
+        anchor_list.append(a)
         chosen.append(a); used.add(a)
 
-    # H/O/U
     for key, pool_key in [("H","hot"), ("O","overdue"), ("U","undrawn")]:
         cnt = pattern_counts.get(key, 0)
         if cnt <= 0: continue
@@ -249,14 +226,12 @@ def _gen_ticket_with_pattern(
             if n not in used:
                 chosen.append(n); used.add(n)
 
-    # Top-up from union if short
     union = list(dict.fromkeys(pools.get("hot", []) + pools.get("overdue", []) + pools.get("undrawn", [])))
     for n in union:
         if len(chosen) >= need: break
         if n not in used:
             chosen.append(n); used.add(n)
 
-    # If still short, fill from 1..max
     if len(chosen) < need:
         for n in range(1, spec["main_max"]+1):
             if len(chosen) >= need: break
@@ -265,7 +240,6 @@ def _gen_ticket_with_pattern(
 
     mains = sorted(chosen[:need])
 
-    # sum-band enforcement; if out of band, try one reshuffle (simple)
     s = sum(mains)
     lo, hi = sum_band
     if not (lo <= s <= hi):
@@ -280,10 +254,8 @@ def _gen_ticket_with_pattern(
         if lo <= s2 <= hi:
             mains = mains2
 
-    # bonus
     bonus = None
     if spec["bonus_max"]:
-        # pick from bonus hot/overdue first, otherwise undrawn bonus (not tracked – approximate with any in range)
         b_hot = pools.get("bonus_hot", [])
         b_over = pools.get("bonus_overdue", [])
         b_pool = b_hot + b_over
@@ -297,14 +269,12 @@ def build_50_pool(game: str, pools: Dict[str,List[int]], sum_band: Tuple[int,int
     out = []
     vip_rotation = pools.get("vip", [])[:]
     lrr_rotation = pools.get("lrr", [])[:]
-    # ensure rotations have something; if empty use hot list as fallback to avoid stalls
     if not vip_rotation:
         vip_rotation = pools.get("hot", [])[:]
     if not lrr_rotation:
         lrr_rotation = pools.get("hot", [])[:]
 
     patterns = PATTERNS_MM_PB if game in ("MM","PB") else PATTERNS_IL
-    # cycle patterns until we have 50 rows
     idx = 0
     guard = 0
     while len(out) < 50 and guard < 1000:
@@ -321,9 +291,7 @@ def build_50_pool(game: str, pools: Dict[str,List[int]], sum_band: Tuple[int,int
 
 def match_stats_mm_pb(pool: List[Tuple[List[int], int]], latest: Tuple[List[int], int]) -> Dict:
     target_mains, target_bonus = latest
-    res = {
-        "3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []
-    }
+    res = {"3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []}
     for i, (mains, bonus) in enumerate(pool, start=1):
         hit = len(set(mains).intersection(target_mains))
         hasB = (bonus == target_bonus)
@@ -352,7 +320,6 @@ def _sum_band_for_game(game: str, hist_mains: List[List[int]]) -> Tuple[int,int]
     base = DEFAULT_SUM_BANDS[game]
     try:
         band = middle50_from_hist(hist_mains, base)
-        # sanity: widen slightly if equal
         if band[0] >= band[1]:
             return base
         return band
@@ -384,14 +351,9 @@ def _pools_for_game(
     return pools
 
 def handle_run(payload: Dict, data_dir: str) -> Dict:
-    """
-    Phase 1 (phase='phase1'): generate 50-row pools per game vs NJ; save state.
-    Phase 2 (phase='phase2'): load saved_path, promote NJ into history, run 100x 50-pool sims; return stats + buy lists; save new state.
-    """
     phase = (payload.get("phase") or "").lower()
 
     if phase == "phase2":
-        # Load saved Phase-1 state and run predictions 100x
         saved_path = payload.get("saved_path") or ""
         if not saved_path:
             raise ValueError("phase2 requires saved_path")
@@ -399,25 +361,20 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
             state = json.load(f)
         return _run_phase2(state, data_dir)
 
-    # Phase 1 inputs
-    # LATEST_*
     mm_latest = parse_latest_pair(payload.get("LATEST_MM",""))
     pb_latest = parse_latest_pair(payload.get("LATEST_PB",""))
-    il_jp = parse_latest_pair(payload.get("LATEST_IL_JP",""))[0]  # no bonus
+    il_jp = parse_latest_pair(payload.get("LATEST_IL_JP",""))[0]
     il_m1 = parse_latest_pair(payload.get("LATEST_IL_M1",""))[0]
     il_m2 = parse_latest_pair(payload.get("LATEST_IL_M2",""))[0]
 
-    # FEEDS
     f_mm = parse_feed_mm_pb(payload.get("FEED_MM",""))
     f_pb = parse_feed_mm_pb(payload.get("FEED_PB",""))
     f_il = parse_feed_il(payload.get("FEED_IL",""))
 
-    # HIST blobs
     hist_mm = parse_hist_blob_mm(payload.get("HIST_MM_BLOB",""))
     hist_pb = parse_hist_blob_mm(payload.get("HIST_PB_BLOB",""))
     hist_il = parse_hist_blob_il(payload.get("HIST_IL_BLOB",""))
 
-    # Build pools & bands
     band_mm = _sum_band_for_game("MM", _hist_mains_only_mm(hist_mm))
     band_pb = _sum_band_for_game("PB", _hist_mains_only_mm(hist_pb))
     band_il = _sum_band_for_game("IL", hist_il)
@@ -426,34 +383,24 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb), f_pb["bonus_hot"], f_pb["bonus_overdue"])
     pools_il = _pools_for_game("IL", f_il["hot"], f_il["overdue"], hist_il)
 
-    # Generate 50 rows
     pool_mm = build_50_pool("MM", pools_mm, band_mm)
     pool_pb = build_50_pool("PB", pools_pb, band_pb)
     pool_il = build_50_pool("IL", pools_il, band_il)
 
-    # Evaluate vs NJ (jackpot just drawn)
     stats_mm = match_stats_mm_pb(pool_mm, mm_latest)
     stats_pb = match_stats_mm_pb(pool_pb, pb_latest)
     stats_il_jp = match_stats_il(pool_il, il_jp)
     stats_il_m1 = match_stats_il(pool_il, il_m1)
     stats_il_m2 = match_stats_il(pool_il, il_m2)
 
-    # Save state to re-use in Phase 2
     state = {
         "created_at": _nowstamp(),
         "phase": "phase1",
         "band": {"MM": band_mm, "PB": band_pb, "IL": band_il},
         "pools": {"MM": pools_mm, "PB": pools_pb, "IL": pools_il},
-        "pool_rows": {
-            "MM": pool_mm, "PB": pool_pb, "IL": pool_il
-        },
-        "latest": {
-            "MM": mm_latest, "PB": pb_latest,
-            "IL_JP": il_jp, "IL_M1": il_m1, "IL_M2": il_m2
-        },
-        "history": {
-            "MM": hist_mm, "PB": hist_pb, "IL": hist_il
-        }
+        "pool_rows": {"MM": pool_mm, "PB": pool_pb, "IL": pool_il},
+        "latest": {"MM": mm_latest, "PB": pb_latest, "IL_JP": il_jp, "IL_M1": il_m1, "IL_M2": il_m2},
+        "history": {"MM": hist_mm, "PB": hist_pb, "IL": hist_il}
     }
     saved_path = _save_json(state, data_dir, "lotto_phase1")
 
@@ -469,15 +416,12 @@ def handle_run(payload: Dict, data_dir: str) -> Dict:
     }
 
 def _promote_newest_into_history(state: Dict) -> Dict:
-    """
-    Move NJ into top of the 20-draw history, keeping only the most recent 20.
-    """
     latest = state["latest"]
     hist = state["history"]
-    # Insert newest at top (index 0)
+
     mm_latest = (sorted(latest["MM"][0]), int(latest["MM"][1]))
     pb_latest = (sorted(latest["PB"][0]), int(latest["PB"][1]))
-    il_latest = sorted(latest["IL_JP"])  # JP—only one IL used for training
+    il_latest = sorted(latest["IL_JP"])
 
     hist_mm = [mm_latest] + hist["MM"]
     hist_pb = [pb_latest] + hist["PB"]
@@ -496,24 +440,21 @@ def _aggregate_hits(agg: Dict[str, Dict[str, List[int]]], stats: Dict[str, List[
         agg[k].extend(v)
 
 def _run_phase2(state: Dict, data_dir: str) -> Dict:
-    # Promote NJ into history
     state = _promote_newest_into_history(state)
 
     hist_mm = state["history"]["MM"]; hist_pb = state["history"]["PB"]; hist_il = state["history"]["IL"]
     f_mm = state["pools"]["MM"]; f_pb = state["pools"]["PB"]; f_il = state["pools"]["IL"]
-    # Recompute bands with promoted history
+
     band_mm = _sum_band_for_game("MM", _hist_mains_only_mm(hist_mm))
     band_pb = _sum_band_for_game("PB", _hist_mains_only_mm(hist_pb))
     band_il = _sum_band_for_game("IL", hist_il)
 
-    # Build pools again (VIP/LRR/Undrawn change after promotion)
     pools_mm = _pools_for_game("MM", f_mm["hot"], f_mm["overdue"], _hist_mains_only_mm(hist_mm),
                                f_mm.get("bonus_hot",[]), f_mm.get("bonus_overdue",[]))
     pools_pb = _pools_for_game("PB", f_pb["hot"], f_pb["overdue"], _hist_mains_only_mm(hist_pb),
                                f_pb.get("bonus_hot",[]), f_pb.get("bonus_overdue",[]))
     pools_il = _pools_for_game("IL", f_il["hot"], f_il["overdue"], hist_il)
 
-    # Simulate 100 runs (regenerate 50 rows each; DO NOT print them)
     runs = 100
     latest = state["latest"]
     mm_latest = latest["MM"]; pb_latest = latest["PB"]
@@ -525,7 +466,6 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
               "M1":{"3":[], "4":[], "5":[], "6":[]},
               "M2":{"3":[], "4":[], "5":[], "6":[]}}
 
-    # Collect candidates for buy lists by simple scoring (frequency)
     freq_mm = {}
     freq_pb = {}
     freq_il = {}
@@ -535,7 +475,6 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
         pool_pb = build_50_pool("PB", pools_pb, band_pb)
         pool_il = build_50_pool("IL", pools_il, band_il)
 
-        # aggregate stats
         _aggregate_hits(agg_mm, match_stats_mm_pb(pool_mm, mm_latest))
         _aggregate_hits(agg_pb, match_stats_mm_pb(pool_pb, pb_latest))
         il_stats_jp = match_stats_il(pool_il, il_jp)
@@ -546,14 +485,12 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
             agg_il["M1"][k].extend(il_stats_m1.get(k,[]))
             agg_il["M2"][k].extend(il_stats_m2.get(k,[]))
 
-        # score tickets: mains tuple + bonus
         def bump(dct, ticket):
             dct[ticket] = dct.get(ticket, 0) + 1
         for t in pool_mm: bump(freq_mm, (tuple(t[0]), t[1]))
         for t in pool_pb: bump(freq_pb, (tuple(t[0]), t[1]))
         for t in pool_il: bump(freq_il, (tuple(t[0]), None))
 
-    # Pick buy lists: top-N by frequency, dedup
     def top_list(freq_map, n):
         items = sorted(freq_map.items(), key=lambda kv: (-kv[1], kv[0]))
         out = []
@@ -579,7 +516,6 @@ def _run_phase2(state: Dict, data_dir: str) -> Dict:
         "buy_lists": {"MM": buy_mm, "PB": buy_pb, "IL": buy_il},
     }
 
-    # Save a Phase-2 state for Phase-3 confirmation
     state2 = {
         "created_at": _nowstamp(),
         "phase": "phase2",
@@ -604,10 +540,6 @@ def list_recent(data_dir: str) -> Dict:
     return {"files": files[:20]}
 
 def _parse_nwj_blob(nwj: Dict) -> Dict:
-    """
-    Accepts NWJ in the Phase 3 textarea as JSON mapping with keys LATEST_MM, etc.
-    Values should be like [[mains], bonus] for MM/PB, and [[mains], null] for IL lines.
-    """
     out = {}
     if not isinstance(nwj, dict):
         return out
@@ -622,36 +554,28 @@ def _parse_nwj_blob(nwj: Dict) -> Dict:
     return out
 
 def handle_confirm(payload: Dict, data_dir: str) -> Dict:
-    """
-    Phase 3: Load Phase-2 saved state file; compare its buy lists vs NWJ (newest winning jackpot).
-    """
     saved_path = payload.get("saved_path") or ""
     if not saved_path:
         raise ValueError("confirm requires saved_path")
     with open(saved_path, "r", encoding="utf-8") as f:
         state2 = json.load(f)
 
-    # Allow NWJ override via textarea JSON
     nwj_raw = payload.get("NWJ")
     latest = state2.get("latest", {})
-    if nwj_raw:
-        # If the UI passed a JSON object already, use it directly; otherwise ignore
-        if isinstance(nwj_raw, dict):
-            parsed = _parse_nwj_blob(nwj_raw)
-            if parsed.get("LATEST_MM"): latest["MM"] = parsed["LATEST_MM"]
-            if parsed.get("LATEST_PB"): latest["PB"] = parsed["LATEST_PB"]
-            if parsed.get("LATEST_IL_JP"): latest["IL_JP"] = parsed["LATEST_IL_JP"][0]
-            if parsed.get("LATEST_IL_M1"): latest["IL_M1"] = parsed["LATEST_IL_M1"][0]
-            if parsed.get("LATEST_IL_M2"): latest["IL_M2"] = parsed["LATEST_IL_M2"][0]
+    if nwj_raw and isinstance(nwj_raw, dict):
+        parsed = _parse_nwj_blob(nwj_raw)
+        if parsed.get("LATEST_MM"): latest["MM"] = parsed["LATEST_MM"]
+        if parsed.get("LATEST_PB"): latest["PB"] = parsed["LATEST_PB"]
+        if parsed.get("LATEST_IL_JP"): latest["IL_JP"] = parsed["LATEST_IL_JP"][0]
+        if parsed.get("LATEST_IL_M1"): latest["IL_M1"] = parsed["LATEST_IL_M1"][0]
+        if parsed.get("LATEST_IL_M2"): latest["IL_M2"] = parsed["LATEST_IL_M2"][0]
 
-    # Evaluate buy lists vs NWJ
     mm_stats = {"3":[], "3B":[], "4":[], "4B":[], "5":[], "5B":[]}
     pb_stats = {"3":[], "3B":[], "4":[], "4B":[], "5":[], "5B":[]}
     il_stats = {"JP":{"3":[], "4":[], "5":[], "6":[]},
                 "M1":{"3":[], "4":[], "5":[], "6":[]},
                 "M2":{"3":[], "4":[], "5":[], "6":[]}}
 
-    # convert buy lists to tuple form for matching
     buy = state2.get("buy_lists", {})
     buys_mm = [ (row["mains"], row.get("bonus")) for row in buy.get("MM", []) ]
     buys_pb = [ (row["mains"], row.get("bonus")) for row in buy.get("PB", []) ]
