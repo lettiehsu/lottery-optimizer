@@ -1,209 +1,270 @@
-<!doctype html>
+<!-- templates/report.html -->
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Lottery Optimizer Report</title>
+  <title>Lottery Optimizer — Report</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica,Arial,sans-serif;margin:24px;line-height:1.42}
-    h1,h2,h3{margin:0.6em 0 0.4em}
-    .grid{display:grid;gap:16px}
-    .grid-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
-    table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
-    th,td{border:1px solid #ddd;padding:6px 8px}
-    th{background:#f6f6f6;text-align:left}
-    code{background:#f3f3f3;padding:0 4px;border-radius:4px}
-    .tag{display:inline-block;background:#eef;border:1px solid #ccd;padding:2px 6px;border-radius:8px;margin-right:6px}
-    .muted{color:#666}
-    .box{border:1px solid #e3e3e3;border-radius:10px;padding:14px}
-    .small{font-size:0.925rem}
+    :root{--fg:#0c0d0e;--mut:#6b7280;--bg:#ffffff;--card:#fafafa;--acc:#2563eb;}
+    *{box-sizing:border-box} body{font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;margin:0;color:var(--fg);background:var(--bg)}
+    main{max-width:980px;margin:32px auto;padding:0 16px}
+    h1{font-size:24px;margin:0 0 8px} h2{font-size:18px;margin:28px 0 8px}
+    p.mut{color:var(--mut);margin:0 0 16px}
+    form.card{background:var(--card);border:1px solid #eee;border-radius:12px;padding:16px;margin:16px 0}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .row > label{display:flex;flex-direction:column;gap:4px;min-width:240px;flex:1}
+    input[type=text], select{padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px}
+    input[type=number]{padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;width:120px}
+    input[type=file]{padding:2px}
+    .actions{display:flex;gap:8px;align-items:center;margin-top:8px}
+    button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer}
+    button.secondary{background:#1118270f;color:#111827;border:1px solid #e5e7eb}
+    code,kbd,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    pre{background:#0b102033;color:#dbeafe;border-radius:10px;padding:12px;overflow:auto}
+    table{width:100%;border-collapse:collapse;margin:8px 0;background:#fff;border:1px solid #eee;border-radius:8px;overflow:hidden}
+    th,td{padding:6px 8px;border-bottom:1px solid #f2f2f2;text-align:left;font-variant-numeric:tabular-nums}
+    tr:last-child > td{border-bottom:0}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#4338ca;font-weight:600}
+    .mut{color:var(--mut)}
+    .ok{color:#059669} .warn{color:#b45309} .err{color:#b91c1c}
   </style>
 </head>
 <body>
+<main>
 
   <h1>Lottery Optimizer — Report</h1>
+  <p class="mut">MM / PB / Illinois Lotto — generate · simulate · confirm</p>
 
-  {% if not res %}
-    <p class="muted">Fill the form and click <strong>Run</strong> to see results.</p>
-  {% else %}
-
-  <!-- Phase 1 -->
-  <h2>Phase 1 — 50-row Batch vs NJ</h2>
-  <div class="grid grid-2">
-    {% for game in ["mm","pb","il"] %}
-    <div class="box">
-      <h3>
-        {% if game=="mm" %}Mega Millions{% elif game=="pb" %}Powerball{% else %}Illinois Lotto{% endif %}
-      </h3>
-
-      {% set batch = res.phase1[game].batch %}
-      {% set hits = res.phase1[game].hits_lines %}
-
-      {% if batch and batch|length>0 %}
-        <table class="small">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Ticket</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in batch %}
-              <tr>
-                <td>{{ loop.index | string | rjust(2,'0') }}</td>
-                <td>
-                  {% if game in ["mm","pb"] %}
-                    {% set mains = row[0] %}{% set bonus = row[1] %}
-                    {{ mains|join(" ") }} &nbsp; <strong>{{ "%02d"|format(bonus) }}</strong>
-                  {% else %}
-                    {{ row|join(" ") }}
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-
-        {% if hits and hits|length>0 %}
-          <p><strong>Hits (≥3-ball):</strong></p>
-          <ul class="small">
-            {% for line in hits %}
-              <li>{{ line }}</li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="muted small">No qualifying hits in this batch.</p>
-        {% endif %}
-
-      {% else %}
-        <p class="muted">No batch generated.</p>
-      {% endif %}
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Phase 2 -->
-  <h2>Phase 2 — 100×50 Simulation (Stats Only)</h2>
-  <div class="grid grid-2">
-    {% for game in ["mm","pb","il"] %}
-    <div class="box">
-      <h3>
-        {% if game=="mm" %}Mega Millions{% elif game=="pb" %}Powerball{% else %}Illinois Lotto{% endif %}
-      </h3>
-
-      {% set totals = res.phase2[game].totals %}
-      {% set top = res.phase2[game].top_positions %}
-
-      {% if totals and totals|length>0 %}
-        <table class="small">
-          <thead><tr>
-            {% for k,v in totals.items() %}<th>{{ k }}</th>{% endfor %}
-          </tr></thead>
-          <tbody><tr>
-            {% for k,v in totals.items() %}<td>{{ v }}</td>{% endfor %}
-          </tr></tbody>
-        </table>
-        {% if top and top|length>0 %}
-          <p class="small"><strong>Top hit positions</strong> (row#:count):
-            {% for t in top %}
-              <span class="tag">{{ t[0] }}:{{ t[1] }}</span>
-            {% endfor %}
-          </p>
-        {% endif %}
-      {% else %}
-        <p class="muted small">No stats.</p>
-      {% endif %}
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Buy lists -->
-  <h2>Recommended Buy Lists</h2>
-  <div class="grid grid-2">
-    {% for game in ["mm","pb"] %}
-    <div class="box">
-      <h3>{% if game=="mm" %}Mega Millions (10){% else %}Powerball (10){% endif %}</h3>
-      {% set lst = res.buy_lists[game] %}
-      {% if lst and lst|length>0 %}
-        <table class="small">
-          <thead><tr><th>#</th><th>Ticket</th></tr></thead>
-          <tbody>
-            {% for t in lst %}
-              <tr>
-                <td>{{ loop.index | string | rjust(2,'0') }}</td>
-                <td>{{ t[0]|join(" ") }} &nbsp; <strong>{{ "%02d"|format(t[1]) }}</strong></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="muted small">No tickets.</p>
-      {% endif %}
-    </div>
-    {% endfor %}
-
-    <div class="box">
-      <h3>Illinois Lotto (15)</h3>
-      {% set lst = res.buy_lists.il %}
-      {% if lst and lst|length>0 %}
-        <table class="small">
-          <thead><tr><th>#</th><th>Ticket</th></tr></thead>
-          <tbody>
-            {% for t in lst %}
-              <tr>
-                <td>{{ loop.index | string | rjust(2,'0') }}</td>
-                <td>{{ t|join(" ") }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="muted small">No tickets.</p>
-      {% endif %}
-    </div>
-  </div>
-
-  <!-- Saved path -->
-  {% if res.saved_path %}
-    <p class="small"><strong>Saved buy list:</strong> <code>{{ res.saved_path }}</code></p>
+  {% if error %}
+    <pre class="err">ERROR\n{{ error }}</pre>
   {% endif %}
 
-  <!-- Phase 3 -->
-  {% if res.phase3 %}
-    <h2>Phase 3 — Confirmation vs NWJ</h2>
-    <div class="grid grid-2">
-      {% for section in ["mm","pb","il"] %}
-      <div class="box">
-        <h3>
-          {% if section=="mm" %}Mega Millions{% elif section=="pb" %}Powerball{% else %}Illinois Lotto{% endif %}
-        </h3>
+  <!-- 1) Upload (optional) -->
+  <h2>1) Upload optional inputs</h2>
+  <form class="card" action="/upload" method="post" enctype="multipart/form-data">
+    <div class="grid">
+      <label>MM history CSV (optional)<input type="file" name="mm_hist" /></label>
+      <label>PB history CSV (optional)<input type="file" name="pb_hist" /></label>
+      <label>IL history CSV (optional)<input type="file" name="il_hist" /></label>
+      <label>MM feed (txt)<input type="file" name="mm_feed" /></label>
+      <label>PB feed (txt)<input type="file" name="pb_feed" /></label>
+      <label>IL feed (txt)<input type="file" name="il_feed" /></label>
+    </div>
+    <div class="actions">
+      <button type="submit">Upload</button>
+      <span class="mut">Files are saved under <code>{{ data_dir or "/tmp" }}</code> on the server.</span>
+    </div>
+  </form>
 
-        {% set p3 = res.phase3.get(section) %}
-        {% if p3 %}
-          {% if p3.totals %}
-          <table class="small">
-            <thead><tr>{% for k,v in p3.totals.items() %}<th>{{ k }}</th>{% endfor %}</tr></thead>
-            <tbody><tr>{% for k,v in p3.totals.items() %}<td>{{ v }}</td>{% endfor %}</tr></tbody>
-          </table>
-          {% endif %}
+  <!-- 2) Run Phase 1 & 2 -->
+  <h2>2) Run Phase 1 &amp; 2</h2>
+  <form class="card" action="/run_phase12" method="post">
+    <div class="row">
+      <label>LATEST_MM <span class="mut">(e.g. “[10,14,34,40,43],5”)</span>
+        <input type="text" name="LATEST_MM" value="[10,14,34,40,43],5" />
+      </label>
+      <label>LATEST_PB <span class="mut">(e.g. “[14,15,32,42,49],1”)</span>
+        <input type="text" name="LATEST_PB" value="[14,15,32,42,49],1" />
+      </label>
+    </div>
+    <div class="row">
+      <label>LATEST_IL_JP <span class="mut">(e.g. “[1,4,5,10,18,49]”)</span>
+        <input type="text" name="LATEST_IL_JP" value="[1,4,5,10,18,49]" />
+      </label>
+      <label>LATEST_IL_M1
+        <input type="text" name="LATEST_IL_M1" value="[6,8,10,18,26,27]" />
+      </label>
+      <label>LATEST_IL_M2
+        <input type="text" name="LATEST_IL_M2" value="[2,18,21,27,43,50]" />
+      </label>
+    </div>
+    <div class="actions">
+      <label>Runs <input type="number" min="1" max="500" name="runs" value="100" /></label>
+      <label><input type="checkbox" name="quiet" checked /> Quiet progress (10/100 etc.)</label>
+      <button type="submit">Run Phase 1 &amp; 2</button>
+    </div>
+    <p class="mut">Generates the 50-row batch per game, prints Phase-1 hits, runs sims, and saves a <code>buy_session_*.json</code>.</p>
+  </form>
 
-          {% if p3.lines and p3.lines|length>0 %}
-            <p class="small"><strong>Detailed rows (≥3 or 2+bonus):</strong></p>
-            <ul class="small">
-              {% for l in p3.lines %}<li>{{ l }}</li>{% endfor %}
-            </ul>
+  <!-- 3) Confirm Phase 3 -->
+  <h2>3) Confirm Phase 3</h2>
+  <form class="card" action="/confirm_phase3" method="post">
+    <div class="row">
+      <label>Saved buy list
+        <select name="saved_file">
+          <option value="">— choose —</option>
+          {% for f in recent %}
+            <option value="{{ f }}">{{ f }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>NWJ_MM <span class="mut">(e.g. “[10,14,34,40,43],5”)</span>
+        <input type="text" name="NWJ_MM" placeholder="[m1,m2,m3,m4,m5],bonus" />
+      </label>
+      <label>NWJ_PB <span class="mut">(e.g. “[14,15,32,42,49],1”)</span>
+        <input type="text" name="NWJ_PB" placeholder="[m1,m2,m3,m4,m5],bonus" />
+      </label>
+    </div>
+    <div class="row">
+      <label>NWJ_IL_JP <input type="text" name="NWJ_IL_JP" placeholder="[m1,m2,m3,m4,m5,m6]" /></label>
+      <label>NWJ_IL_M1 <input type="text" name="NWJ_IL_M1" placeholder="[m1,m2,m3,m4,m5,m6]" /></label>
+      <label>NWJ_IL_M2 <input type="text" name="NWJ_IL_M2" placeholder="[m1,m2,m3,m4,m5,m6]" /></label>
+    </div>
+    <div class="actions">
+      <label><input type="checkbox" name="recall_headings" checked /> Also recall Phase-1/2 headings from the saved file</label>
+      <button type="submit">Confirm Phase 3</button>
+    </div>
+    <p class="mut">Confirms against the exact tickets in that saved JSON.</p>
+  </form>
+
+  <!-- Results -->
+  {% if res %}
+    <h2>Result</h2>
+
+    <!-- Phase 1 -->
+    <h3>Phase 1 — 50-row batch &amp; hits</h3>
+    <div class="grid">
+      {% for game in ["mm","pb","il"] %}
+        <div>
+          <div class="pill">{{ "Mega Millions" if game=="mm" else ("Powerball" if game=="pb" else "Illinois Lotto") }}</div>
+          {% set sec = res.phase1[game] if res.phase1 else None %}
+          {% if sec and sec.batch %}
+            <table>
+              <thead><tr><th>#</th><th>Row</th></tr></thead>
+              <tbody>
+                {% for row in sec.batch %}
+                  <tr>
+                    <td>{{ loop.index | pad2 }}</td>
+                    <td>
+                      {% if game in ["mm","pb"] %}
+                        {{ row[0] | join(" ") }} &nbsp;&nbsp;&nbsp; <b>{{ "%02d"|format(row[1]) }}</b>
+                      {% else %}
+                        {{ row | join(" ") }}
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% if sec.hits_lines and sec.hits_lines|length>0 %}
+              <pre>Hits (≥3-ball):\n{{ sec.hits_lines | join("\n") }}</pre>
+            {% else %}
+              <p class="mut">No ≥3-ball (or 2+bonus) hits found.</p>
+            {% endif %}
           {% else %}
-            <p class="muted small">No qualifying hits.</p>
+            <p class="mut">No data for this game.</p>
           {% endif %}
-        {% else %}
-          <p class="muted small">No confirmation data.</p>
-        {% endif %}
-      </div>
+        </div>
       {% endfor %}
     </div>
+
+    <!-- Phase 2 -->
+    <h3>Phase 2 — Simulation totals</h3>
+    <div class="grid">
+      {% for game in ["mm","pb","il"] %}
+        {% set sec = res.phase2[game] if res.phase2 else None %}
+        <div>
+          <div class="pill">{{ "Mega Millions" if game=="mm" else ("Powerball" if game=="pb" else "Illinois Lotto") }}</div>
+          {% if sec %}
+            {% if sec.totals and sec.totals|length>0 %}
+              <table>
+                <thead><tr><th>Tier</th><th>Count</th></tr></thead>
+                <tbody>
+                  {% for k,v in sec.totals.items() %}
+                    <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p class="mut">No totals.</p>
+            {% endif %}
+            {% if sec.top_positions and sec.top_positions|length>0 %}
+              <p class="mut">Top hit positions: {{ sec.top_positions | map('join',':') | join(', ') }}</p>
+            {% endif %}
+          {% else %}
+            <p class="mut">No data.</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+
+    <!-- Buy lists -->
+    <h3>Suggested Buy Lists</h3>
+    <div class="grid">
+      <div>
+        <div class="pill">MM — Buy 10</div>
+        {% if res.buy_lists.mm %}
+          <table><tbody>
+            {% for t in res.buy_lists.mm %}
+              <tr><td>{{ loop.index | pad2 }}.</td><td>{{ t[0] | join(' ') }}&nbsp;&nbsp;&nbsp;<b>{{ '%02d'|format(t[1]) }}</b></td></tr>
+            {% endfor %}
+          </tbody></table>
+        {% else %}<p class="mut">None</p>{% endif %}
+      </div>
+      <div>
+        <div class="pill">PB — Buy 10</div>
+        {% if res.buy_lists.pb %}
+          <table><tbody>
+            {% for t in res.buy_lists.pb %}
+              <tr><td>{{ loop.index | pad2 }}.</td><td>{{ t[0] | join(' ') }}&nbsp;&nbsp;&nbsp;<b>{{ '%02d'|format(t[1]) }}</b></td></tr>
+            {% endfor %}
+          </tbody></table>
+        {% else %}<p class="mut">None</p>{% endif %}
+      </div>
+      <div>
+        <div class="pill">Lotto — Buy 15</div>
+        {% if res.buy_lists.il %}
+          <table><tbody>
+            {% for t in res.buy_lists.il %}
+              <tr><td>{{ loop.index | pad2 }}.</td><td>{{ t | join(' ') }}</td></tr>
+            {% endfor %}
+          </tbody></table>
+        {% else %}<p class="mut">None</p>{% endif %}
+      </div>
+    </div>
+
+    {% if res.saved_path %}
+      <p class="mut">Saved to: <code>{{ res.saved_path }}</code></p>
+    {% endif %}
+
+    <!-- Phase 3 block (when you run confirmation) -->
+    {% if res.phase3 %}
+      <h3>Phase 3 — Confirmation</h3>
+      {% if res.phase3.summary %}
+        <pre>{{ res.phase3.summary }}</pre>
+      {% endif %}
+      {% if res.phase3.details and res.phase3.details|length>0 %}
+        <table>
+          <thead><tr><th>#</th><th>Label</th></tr></thead>
+          <tbody>
+            {% for line in res.phase3.details %}
+              <tr><td>{{ loop.index | pad2 }}</td><td>{{ line }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <p class="mut">Fill the form and click <b>Run</b> to see results.</p>
   {% endif %}
 
+  <h3>Recent buy lists</h3>
+  {% if recent and recent|length>0 %}
+    <ul>
+      {% for f in recent %}
+        <li><code>{{ f }}</code></li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="mut">None yet.</p>
   {% endif %}
 
+  <p class="mut">Tip: set an <code>APP_KEY</code> env var and send it as header <code>X-App-Key</code> for basic protection (optional).</p>
+
+</main>
 </body>
 </html>
