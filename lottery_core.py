@@ -219,32 +219,57 @@ def generate_batch_mm_pb(game_spec, main_hist, bonus_hist, feeds, patterns, batc
     iqr = iqr_band_from_history(main_hist)
     pools = build_pools(game_spec, main_hist, feeds)
     batch = []; p_idx = 0; guard = 0
-    while len(batch) < batch_size and guard < batch_size * 20:
+
+    while len(batch) < batch_size and guard < batch_size * 30:
         guard += 1
-        pat = patterns[p_idx % len(patterns)]
-        if pat[0] == "VIP" and not pools["VIP"]: p_idx += 1; continue
-        if pat[0] == "LRR" and not pools["LRR"]: p_idx += 1; continue
+        base = patterns[p_idx % len(patterns)]
+        pat = base
+
+        # If VIP/LRR pool is empty, drop the anchor (set count=0) instead of skipping
+        if pat[0] == "VIP" and not pools["VIP"]:
+            pat = ("VIP", 0, pat[2], pat[3], pat[4], pat[5], pat[6], pat[7])
+        if pat[0] == "LRR" and not pools["LRR"]:
+            pat = ("LRR", 0, pat[2], pat[3], pat[4], pat[5], pat[6], pat[7])
+
         mains = generate_ticket_from_pattern(game_spec, pat, pools, iqr)
-        if mains is None: p_idx += 1; continue
+        if mains is None:
+            p_idx += 1
+            continue
+
         b = pick_bonus(game_spec, feeds, bonus_hist)
         t = (mains, b)
-        if t not in batch: batch.append(t)
+        if t not in batch:
+            batch.append(t)
         p_idx += 1
+
     return batch
+
 
 def generate_batch_il(game_spec, main_hist, feeds, patterns, batch_size=50):
     iqr = iqr_band_from_history(main_hist)
     pools = build_pools(game_spec, main_hist, feeds)
     batch = []; p_idx = 0; guard = 0
-    while len(batch) < batch_size and guard < batch_size * 20:
+
+    while len(batch) < batch_size and guard < batch_size * 30:
         guard += 1
-        pat = patterns[p_idx % len(patterns)]
-        if pat[0] == "VIP" and not pools["VIP"]: p_idx += 1; continue
-        if pat[0] == "LRR" and not pools["LRR"]: p_idx += 1; continue
+        base = patterns[p_idx % len(patterns)]
+        pat = base
+
+        # If VIP/LRR pool is empty, drop the anchor (set count=0) instead of skipping
+        if pat[0] == "VIP" and not pools["VIP"]:
+            pat = ("VIP", 0, pat[2], pat[3], pat[4], pat[5], pat[6], pat[7])
+        if pat[0] == "LRR" and not pools["LRR"]:
+            pat = ("LRR", 0, pat[2], pat[3], pat[4], pat[5], pat[6], pat[7])
+
         mains = generate_ticket_from_pattern(game_spec, pat, pools, iqr)
-        if mains is None: p_idx += 1; continue
-        if mains not in batch: batch.append(mains)
+        if mains is None:
+            p_idx += 1
+            continue
+
+        if mains not in batch:
+            batch.append(mains)
         p_idx += 1
+
     return batch
 
 # ────────────────────────────────────────────────────────────────────────────────
