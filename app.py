@@ -1,130 +1,172 @@
-# app.py — JSON-only safe mode to surface real errors
-from __future__ import annotations
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-import os, sys, glob, json, ast, traceback
-from typing import Any, Dict, List, Optional, Tuple
-from flask import Flask, request, jsonify, Response
+import json, os, time, uuid
+from pathlib import Path
+from typing import Dict, Any, Optional
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
-app = Flask(__name__)
-app.config.update(PROPAGATE_EXCEPTIONS=True)
+from lottery_core import (
+    parse_hist_blob, parse_feed_blob, GameSpec, G_MM, G_PB, G_IL,
+    phase1_evaluate, phase2_predict_and_recommend, phase3_confirm,
+    pack_latest_dict, normalize_latest_payload
+)
 
-DATA_DIR = os.getenv("DATA_DIR", "/tmp")
-BUY_DIR = os.path.join(DATA_DIR, "buylists")
-os.makedirs(BUY_DIR, exist_ok=True)
+APP_TITLE = "Lottery Optimizer API (safe mode)"
 
-# ---------- always show REAL errors (no HTML) ----------
-@app.errorhandler(Exception)
-def handle_any_error(e):
-    tb = traceback.format_exc()
-    print("UNCAUGHT ERROR:", e, file=sys.stderr)
-    print(tb, file=sys.stderr)
-    # Always return JSON so we see the message
-    return jsonify({
-        "ok": False,
-        "path": request.path,
-        "error": f"{e.__class__.__name__}: {e}",
-        "trace": tb
-    }), 500
+BASE_DIR = Path(__file__).parent.resolve()
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
 
-# ---------- lazy import core so app boots even if it has issues ----------
-def import_core():
-    try:
-        import lottery_core as core  # must expose run_phase_1_and_2, confirm_phase_3
-        return core, None
-    except Exception as e:
-        return None, f"Failed to import lottery_core.py: {e}\n\n{traceback.format_exc()}"
+app = FastAPI(title=APP_TITLE)
 
-# ---------- helpers ----------
-def parse_literal(s: str):
-    """Parse inputs like:
-       "([10,14,34,40,43], 5)" or "[10,14,34,40,43], 5"
-       or "[1,4,5,10,18,49]" -> list
-    """
-    if s is None:
-        return None
-    s = s.strip()
-    if not s:
-        return None
-    try:
-        return ast.literal_eval(s)
-    except Exception:
-        # allow "[...], bonus" (without outer tuple)
-        if "]" in s and s.count("]") == 1 and "," in s.split("]")[-1]:
-            left, right = s.split("]", 1)
-            left += "]"
-            mains = ast.literal_eval(left)
-            bonus = int(right.strip().lstrip(",").strip())
-            return (mains, bonus)
-        raise
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-def recent_files(limit: int = 10) -> List[str]:
-    paths = sorted(glob.glob(os.path.join(BUY_DIR, "buy_session_*.json")), reverse=True)
-    return [os.path.basename(p) for p in paths[:limit]]
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request, "title": APP_TITLE})
 
-# ---------- routes ----------
 @app.get("/health")
-def health():
-    return jsonify({"ok": True, "python": sys.version.split()[0], "buy_dir": BUY_DIR})
-
-@app.get("/")
-def home():
-    return Response(
-        "Lottery Optimizer API (safe mode)\n\n"
-        "POST /run_json with form fields LATEST_* to generate & simulate.\n"
-        "POST /confirm_json with saved_path & NWJ_* to confirm.\n"
-        "GET  /recent for recent saved buy files.\n"
-        "GET  /health to check service.\n",
-        mimetype="text/plain"
-    )
+async def health():
+    return {"ok": True, "ts": time.time()}
 
 @app.get("/recent")
-def recent():
-    return jsonify({"ok": True, "files": recent_files(), "dir": BUY_DIR})
+async def recent():
+    files = sorted(DATA_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    out = []
+    for p in files[:20]:
+        try:
+            meta = json.loads(p.read_text(encoding="utf-8")).get("_meta", {})
+        except Exception:
+            meta = {}
+        out.append({
+            "file": p.name,
+            "mtime": p.stat().st_mtime,
+            "size": p.stat().st_size,
+            "meta": meta
+        })
+    return {"saved": out}
+
+def _coalesce_form_or_json(req: Request, form: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+    # prefer JSON body keys; fall back to form fields
+    out = {}
+    out.update(form or {})
+    out.update(body or {})
+    return out
 
 @app.post("/run_json")
-def run_json():
-    core, err = import_core()
-    if err:
-        return jsonify({"ok": False, "where": "import", "error": err}), 500
-    f = request.form
-    cfg = {
-        "LATEST_MM":   parse_literal(f.get("LATEST_MM", "")),
-        "LATEST_PB":   parse_literal(f.get("LATEST_PB", "")),
-        "LATEST_IL_JP": parse_literal(f.get("LATEST_IL_JP", "")),
-        "LATEST_IL_M1": parse_literal(f.get("LATEST_IL_M1", "")),
-        "LATEST_IL_M2": parse_literal(f.get("LATEST_IL_M2", "")),
-        "runs":        int(f.get("runs", "100") or "100"),
-        "quiet":       (f.get("quiet", "on") == "on"),
-        "DATA_DIR":    DATA_DIR,
-        "BUY_DIR":     BUY_DIR,
-    }
-    res = core.run_phase_1_and_2(cfg)
-    return jsonify({"ok": True, "res": res})
+async def run_json(request: Request):
+    """
+    Phase 1 (Evaluation) and Phase 2 (Prediction + Buy-list).
+    Input: fields for LATEST_*, HIST_*_BLOB, FEED_* (see README).
+    Returns: evaluation summary + buy lists + saved_path.
+    """
+    try:
+        # accept either form or raw JSON
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        form = {}
+        if request.headers.get("content-type", "").startswith("application/x-www-form-urlencoded") or \
+           request.headers.get("content-type", "").startswith("multipart/form-data"):
+            formdata = await request.form()
+            form = {k: v for k, v in formdata.items()}
+
+        payload = _coalesce_form_or_json(request, form, body)
+        # Normalize "latest" fields from strings -> tuples
+        latest = normalize_latest_payload(payload)
+
+        # Parse blobs/feeds
+        hist_mm = parse_hist_blob(payload.get("HIST_MM_BLOB", ""), game=G_MM)
+        hist_pb = parse_hist_blob(payload.get("HIST_PB_BLOB", ""), game=G_PB)
+        hist_il = parse_hist_blob(payload.get("HIST_IL_BLOB", ""), game=G_IL)
+
+        feed_mm = parse_feed_blob(payload.get("FEED_MM", ""), game=G_MM)
+        feed_pb = parse_feed_blob(payload.get("FEED_PB", ""), game=G_PB)
+        feed_il = parse_feed_blob(payload.get("FEED_IL", ""), game=G_IL)
+
+        # Phase 1 — Evaluation vs NJ (new jackpot)
+        phase1 = phase1_evaluate(
+            latest_dict=latest,  # expects LATEST_MM / LATEST_PB / LATEST_IL_JP/M1/M2 (as provided)
+            hist={"MM": hist_mm, "PB": hist_pb, "IL": hist_il},
+            feeds={"MM": feed_mm, "PB": feed_pb, "IL": feed_il}
+        )
+
+        # Phase 2 — Prediction (move NJ to top, 20-cap hist, simulate 100x)
+        phase2 = phase2_predict_and_recommend(
+            latest_dict=latest,
+            hist={"MM": hist_mm, "PB": hist_pb, "IL": hist_il},
+            feeds={"MM": feed_mm, "PB": feed_pb, "IL": feed_il},
+            runs=100, batch_rows=50
+        )
+
+        # Save a confirmable artifact for Phase 3
+        artifact = {
+            "_meta": {
+                "id": str(uuid.uuid4()),
+                "ts": time.time(),
+                "note": "Phase 1+2 result. Use /confirm_json with NWJ_* to verify buy lists later."
+            },
+            "phase1": phase1,
+            "phase2": {
+                "stats": phase2["stats"],
+                "buy_lists": phase2["buy_lists"],
+                "used_history_capped": phase2["used_history_capped"]
+            }
+        }
+        fname = f"lotto_{int(time.time())}_{artifact['_meta']['id'][:8]}.json"
+        fpath = DATA_DIR / fname
+        fpath.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        return JSONResponse({
+            "ok": True,
+            "saved_path": fpath.name,
+            "phase1": phase1,
+            "phase2": {
+                "stats": phase2["stats"],
+                "buy_lists": phase2["buy_lists"]
+            }
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)}, status_code=500)
 
 @app.post("/confirm_json")
-def confirm_json():
-    core, err = import_core()
-    if err:
-        return jsonify({"ok": False, "where": "import", "error": err}), 500
-    f = request.form
-    saved_input = (f.get("saved_path", "") or "").strip()
-    # allow bare filename or absolute path
-    saved_path = (
-        os.path.join(BUY_DIR, os.path.basename(saved_input))
-        if saved_input and not os.path.isabs(saved_input)
-        else saved_input
-    )
-    nwj = {
-        "NWJ_MM":     parse_literal(f.get("NWJ_MM", "")),
-        "NWJ_PB":     parse_literal(f.get("NWJ_PB", "")),
-        "NWJ_IL_JP":  parse_literal(f.get("NWJ_IL_JP", "")),
-        "NWJ_IL_M1":  parse_literal(f.get("NWJ_IL_M1", "")),
-        "NWJ_IL_M2":  parse_literal(f.get("NWJ_IL_M2", "")),
-        "also_recall": (f.get("also_recall", "on") == "on"),
-    }
-    res = core.confirm_phase_3(saved_path, nwj)
-    return jsonify({"ok": True, "res": res})
+async def confirm_json(
+    request: Request,
+    saved_path: Optional[str] = Form(default=None),
+):
+    """
+    Phase 3 — Confirmation against NWJ.
+    Provide: saved_path (from /run_json), and NWJ_* fields (latest official results).
+    """
+    try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        formdata = await request.form()
+        form = {k: v for k, v in formdata.items()}
+        payload = _coalesce_form_or_json(request, form, body)
 
-# ---------- local debug ----------
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
+        spath = payload.get("saved_path") or saved_path
+        if not spath:
+            return JSONResponse({"ok": False, "error": "missing saved_path"}, status_code=400)
+
+        f = DATA_DIR / spath
+        if not f.exists():
+            return JSONResponse({"ok": False, "error": f"no such saved file: {spath}"}, status_code=404)
+
+        saved = json.loads(f.read_text(encoding="utf-8"))
+
+        # NWJ_* provided now
+        n_latest = normalize_latest_payload(payload, prefix="NWJ_")  # accept NWJ_* keys
+        result = phase3_confirm(saved, n_latest)
+
+        return JSONResponse({"ok": True, "confirmation": result})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)}, status_code=500)
