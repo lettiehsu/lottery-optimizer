@@ -2,105 +2,113 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Lottery Optimizer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" />
+  <title>Lottery Optimizer</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    /* minimal extras for cleaner results */
+    .section { background:#0f172a; border:1px solid #16213e; border-radius:14px; padding:16px; margin:18px 0; }
+    .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:none; background:#3b82f6; color:#fff; font-weight:600; cursor:pointer; }
+    .btn.secondary { background:#0ea5e9; }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
+    .row { display:flex; flex-wrap:wrap; gap:12px; }
+    .col { flex:1 1 360px; min-width:320px; }
+    label { display:block; font-weight:600; margin:10px 0 6px; color:#e2e8f0;}
+    input, textarea { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #233; background:#0b1220; color:#e5e7eb; }
+    h1 { color:#e5e7eb; margin:22px 0 12px; }
+    h2 { color:#e5e7eb; margin:8px 0 16px; font-size:18px; }
+    .note { color:#94a3b8; font-size:13px; }
+    /* results */
+    .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; margin-top:12px; }
+    .card { background:#0b1220; border:1px solid #1f2937; border-radius:12px; padding:12px; }
+    .card h3 { margin:0 0 6px; color:#e5e7eb; font-size:16px; }
+    .kv { display:flex; justify-content:space-between; padding:4px 0; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color:#cbd5e1;}
+    .mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    table.tbl { width:100%; border-collapse:collapse; font-family:ui-monospace, Menlo, Consolas, monospace; }
+    .tbl th, .tbl td { border-bottom:1px dashed #243047; padding:6px 8px; text-align:left; color:#cbd5e1;}
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#111827; border:1px solid #233; margin:2px 2px 0 0; }
+    .muted { color:#94a3b8; }
+    .okline { margin:8px 0; color:#a7f3d0; }
+    .danger { color:#fca5a5; }
+    .copy { margin-left:8px; font-size:12px; background:#111827; border:1px solid #334155; color:#e5e7eb; padding:4px 8px; border-radius:8px; cursor:pointer; }
+    pre.raw { white-space:pre-wrap; word-break:break-word; background:#0b1220; border:1px dashed #243047; padding:10px; border-radius:10px; color:#9ca3af; }
+  </style>
 </head>
-<body>
-  <main class="container">
-    <h1>Lottery Optimizer</h1>
-    <p class="muted">
-      Phase 1 evaluates vs NJ (new jackpot). Phase 2 runs 100×50 batches to generate stats and buy lists.
-    </p>
+<body style="background:#0a0f1d; color:#e5e7eb; max-width:980px; margin:0 auto; padding:22px;">
+  <h1>Lottery Optimizer</h1>
+  <div class="muted">Phase 1 evaluates vs the new jackpot (NJ). Phase 2 runs 100×50 batches to build buy lists. Phase 3 confirms buy lists vs the newest winning jackpot (NWJ).</div>
 
-    <section class="card">
-      <h2>Phase 1 — Evaluation</h2>
-      <form id="phase1-form">
-        <fieldset>
-          <legend>Latest jackpots (NJ)</legend>
-          <label>MM latest (main,mb) — e.g. <code>[10,14,34,40,43], 5</code>
-            <input name="LATEST_MM" placeholder="[10,14,34,40,43], 5" required />
-          </label>
-          <label>PB latest (main,pb)
-            <input name="LATEST_PB" placeholder="[14,15,32,42,49], 1" required />
-          </label>
-          <label>IL JP latest (6 mains)
-            <input name="LATEST_IL_JP" placeholder="[1,4,5,10,18,49]" required />
-          </label>
-          <label>IL M1 latest (6 mains)
-            <input name="LATEST_IL_M1" placeholder="[6,8,10,18,26,27]" required />
-          </label>
-          <label>IL M2 latest (6 mains)
-            <input name="LATEST_IL_M2" placeholder="[2,18,21,27,43,50]" required />
-          </label>
-        </fieldset>
+  <!-- Phase 1 -->
+  <div class="section" id="sec1">
+    <h2>Phase 1 — Evaluation</h2>
+    <div class="row">
+      <div class="col">
+        <label>MM latest (main,mb) — e.g. <span class="mono">[10,14,34,40,43], 5</span></label>
+        <input id="p1_mm" placeholder="[10,14,34,40,43], 5" />
+        <label>PB latest (main,pb)</label>
+        <input id="p1_pb" placeholder="[14,15,32,42,49], 1" />
+        <label>IL JP latest (6 mains)</label>
+        <input id="p1_il_jp" placeholder="[1,4,5,10,18,49]" />
+        <label>IL M1 latest (6 mains)</label>
+        <input id="p1_il_m1" placeholder="[6,8,10,18,26,27]" />
+        <label>IL M2 latest (6 mains)</label>
+        <input id="p1_il_m2" placeholder="[2,18,21,27,43,50]" />
+      </div>
 
-        <fieldset>
-          <legend>Feeds (Lottery Defeated)</legend>
-          <label>FEED_MM (paste the 8 hot/overdue + 3 MB hot/overdue)
-            <textarea name="FEED_MM" rows="6" placeholder="Top 8 hot numbers: ..."></textarea>
-          </label>
-          <label>FEED_PB
-            <textarea name="FEED_PB" rows="6" placeholder="Top 8 hot numbers: ..."></textarea>
-          </label>
-          <label>FEED_IL
-            <textarea name="FEED_IL" rows="4" placeholder="Top 8 hot numbers: ..."></textarea>
-          </label>
-        </fieldset>
+      <div class="col">
+        <label>FEED_MM (paste the 8 hot/overdue + 3 MB hot/overdue)</label>
+        <textarea id="p1_feed_mm" rows="7" placeholder="Top 8 hot numbers: ..."></textarea>
+        <label>FEED_PB</label>
+        <textarea id="p1_feed_pb" rows="7" placeholder="Top 8 hot numbers: ..."></textarea>
+        <label>FEED_IL</label>
+        <textarea id="p1_feed_il" rows="4" placeholder="Top 8 hot numbers: ..."></textarea>
+      </div>
 
-        <fieldset>
-          <legend>History blobs (top 20 kept)</legend>
-          <label>HIST_MM_BLOB
-            <textarea name="HIST_MM_BLOB" rows="10" placeholder="17-18-21-42-64 07&#10;..."></textarea>
-          </label>
-          <label>HIST_PB_BLOB
-            <textarea name="HIST_PB_BLOB" rows="10" placeholder="28-37-42-50-53 19&#10;..."></textarea>
-          </label>
-          <label>HIST_IL_BLOB
-            <textarea name="HIST_IL_BLOB" rows="10" placeholder="05-06-14-15-48-49&#10;..."></textarea>
-          </label>
-        </fieldset>
+      <div class="col">
+        <label>HIST_MM_BLOB</label>
+        <textarea id="p1_hist_mm" rows="10" placeholder="17-18-21-42-64 07&#10;..."></textarea>
+        <label>HIST_PB_BLOB</label>
+        <textarea id="p1_hist_pb" rows="10" placeholder="28-37-42-50-53 19&#10;..."></textarea>
+        <label>HIST_IL_BLOB</label>
+        <textarea id="p1_hist_il" rows="10" placeholder="05-06-14-15-48-49&#10;..."></textarea>
+      </div>
+    </div>
+    <div style="margin-top:14px;">
+      <button class="btn" id="btn_p1">Run Phase 1</button>
+      <button class="btn secondary" id="btn_recent">GET /recent</button>
+    </div>
+    <div id="out_p1" style="margin-top:14px;"></div>
+  </div>
 
-        <button type="submit">Run Phase 1</button>
-      </form>
+  <!-- Phase 2 -->
+  <div class="section" id="sec2">
+    <h2>Phase 2 — Prediction</h2>
+    <label>Saved Phase 1 state file (from /run_json response)</label>
+    <input id="p2_saved" placeholder="/tmp/lotto_phase1_YYYY-MM-DD_HH-MM-SS.json" />
+    <div style="margin-top:12px;">
+      <button class="btn" id="btn_p2">Run Phase 2 (100×)</button>
+    </div>
+    <div id="out_p2" style="margin-top:14px;"></div>
+  </div>
 
-      <pre id="phase1-output" class="output"></pre>
-    </section>
+  <!-- Phase 3 -->
+  <div class="section" id="sec3">
+    <h2>Phase 3 — Confirmation</h2>
+    <label>Saved Phase 2 state file</label>
+    <input id="p3_saved" placeholder="/tmp/lotto_phase2_YYYY-MM-DD_HH-MM-SS.json" />
+    <label>NWJ (same format as Phase 1 LATEST_* inputs if changed)</label>
+    <textarea id="p3_nwj" rows="5" class="mono">{ "LATEST_MM": [[10,14,34,40,43], 5], "LATEST_PB": [[14,15,32,42,49], 1], "LATEST_IL_JP": [[1,4,5,10,18,49], null], "LATEST_IL_M1": [[6,8,10,18,26,27], null], "LATEST_IL_M2": [[2,18,21,27,43,50], null] }</textarea>
+    <div style="margin-top:12px;">
+      <button class="btn" id="btn_p3">Confirm vs NWJ</button>
+    </div>
+    <div id="out_p3" style="margin-top:14px;"></div>
+  </div>
 
-    <section class="card">
-      <h2>Phase 2 — Prediction</h2>
-      <form id="phase2-form">
-        <label>Saved Phase 1 state file (from /run_json response)
-          <input name="saved_path" placeholder="e.g., /tmp/lotto_2025-09-20_14-07-33.json" required />
-        </label>
-        <button type="submit">Run Phase 2 (100×)</button>
-      </form>
-      <pre id="phase2-output" class="output"></pre>
-    </section>
-
-    <section class="card">
-      <h2>Phase 3 — Confirmation</h2>
-      <form id="phase3-form">
-        <label>Saved Phase 2 state file
-          <input name="saved_path" placeholder="e.g., /tmp/lotto_2025-09-20_14-18-02.json" required />
-        </label>
-        <label>NWJ (same format as Phase 1 LATEST_* inputs if changed)
-          <textarea name="NWJ" rows="6" placeholder='{"LATEST_MM":[[10,14,34,40,43],5], "LATEST_PB":[[14,15,32,42,49],1], "LATEST_IL_JP":[[1,4,5,10,18,49],null], "LATEST_IL_M1":[[6,8,10,18,26,27],null], "LATEST_IL_M2":[[2,18,21,27,43,50],null]}'></textarea>
-        </label>
-        <button type="submit">Confirm vs NWJ</button>
-      </form>
-      <pre id="phase3-output" class="output"></pre>
-    </section>
-
-    <section class="card">
-      <h2>Recent Files</h2>
-      <button id="btn-recent">GET /recent</button>
-      <pre id="recent-output" class="output"></pre>
-    </section>
-
-    <footer class="muted">© Your Project — Deployed on Render</footer>
-  </main>
+  <!-- Recent -->
+  <div class="section">
+    <h2>Recent Files</h2>
+    <div id="out_recent"></div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
