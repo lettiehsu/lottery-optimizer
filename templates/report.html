@@ -1,23 +1,209 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>{{ title }}</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8" />
+  <title>Lottery Optimizer Report</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; max-width: 1000px; margin: 32px auto; padding: 0 16px; }
-    pre { background:#0b0d10; color:#e6edf3; padding: 16px; border-radius: 12px; overflow:auto; }
-    a.button { background:#111827; color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none; }
-    .muted { color:#6b7280; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica,Arial,sans-serif;margin:24px;line-height:1.42}
+    h1,h2,h3{margin:0.6em 0 0.4em}
+    .grid{display:grid;gap:16px}
+    .grid-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+    table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+    th,td{border:1px solid #ddd;padding:6px 8px}
+    th{background:#f6f6f6;text-align:left}
+    code{background:#f3f3f3;padding:0 4px;border-radius:4px}
+    .tag{display:inline-block;background:#eef;border:1px solid #ccd;padding:2px 6px;border-radius:8px;margin-right:6px}
+    .muted{color:#666}
+    .box{border:1px solid #e3e3e3;border-radius:10px;padding:14px}
+    .small{font-size:0.925rem}
   </style>
 </head>
 <body>
-  <h1>{{ title }}</h1>
-  {% if saved_json %}
-    <p><a class="button" href="/download/{{ saved_json }}">Download saved buy list JSON</a>
-       <span class="muted">({{ saved_json }})</span></p>
+
+  <h1>Lottery Optimizer — Report</h1>
+
+  {% if not res %}
+    <p class="muted">Fill the form and click <strong>Run</strong> to see results.</p>
+  {% else %}
+
+  <!-- Phase 1 -->
+  <h2>Phase 1 — 50-row Batch vs NJ</h2>
+  <div class="grid grid-2">
+    {% for game in ["mm","pb","il"] %}
+    <div class="box">
+      <h3>
+        {% if game=="mm" %}Mega Millions{% elif game=="pb" %}Powerball{% else %}Illinois Lotto{% endif %}
+      </h3>
+
+      {% set batch = res.phase1[game].batch %}
+      {% set hits = res.phase1[game].hits_lines %}
+
+      {% if batch and batch|length>0 %}
+        <table class="small">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Ticket</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in batch %}
+              <tr>
+                <td>{{ loop.index | string | rjust(2,'0') }}</td>
+                <td>
+                  {% if game in ["mm","pb"] %}
+                    {% set mains = row[0] %}{% set bonus = row[1] %}
+                    {{ mains|join(" ") }} &nbsp; <strong>{{ "%02d"|format(bonus) }}</strong>
+                  {% else %}
+                    {{ row|join(" ") }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        {% if hits and hits|length>0 %}
+          <p><strong>Hits (≥3-ball):</strong></p>
+          <ul class="small">
+            {% for line in hits %}
+              <li>{{ line }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted small">No qualifying hits in this batch.</p>
+        {% endif %}
+
+      {% else %}
+        <p class="muted">No batch generated.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Phase 2 -->
+  <h2>Phase 2 — 100×50 Simulation (Stats Only)</h2>
+  <div class="grid grid-2">
+    {% for game in ["mm","pb","il"] %}
+    <div class="box">
+      <h3>
+        {% if game=="mm" %}Mega Millions{% elif game=="pb" %}Powerball{% else %}Illinois Lotto{% endif %}
+      </h3>
+
+      {% set totals = res.phase2[game].totals %}
+      {% set top = res.phase2[game].top_positions %}
+
+      {% if totals and totals|length>0 %}
+        <table class="small">
+          <thead><tr>
+            {% for k,v in totals.items() %}<th>{{ k }}</th>{% endfor %}
+          </tr></thead>
+          <tbody><tr>
+            {% for k,v in totals.items() %}<td>{{ v }}</td>{% endfor %}
+          </tr></tbody>
+        </table>
+        {% if top and top|length>0 %}
+          <p class="small"><strong>Top hit positions</strong> (row#:count):
+            {% for t in top %}
+              <span class="tag">{{ t[0] }}:{{ t[1] }}</span>
+            {% endfor %}
+          </p>
+        {% endif %}
+      {% else %}
+        <p class="muted small">No stats.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Buy lists -->
+  <h2>Recommended Buy Lists</h2>
+  <div class="grid grid-2">
+    {% for game in ["mm","pb"] %}
+    <div class="box">
+      <h3>{% if game=="mm" %}Mega Millions (10){% else %}Powerball (10){% endif %}</h3>
+      {% set lst = res.buy_lists[game] %}
+      {% if lst and lst|length>0 %}
+        <table class="small">
+          <thead><tr><th>#</th><th>Ticket</th></tr></thead>
+          <tbody>
+            {% for t in lst %}
+              <tr>
+                <td>{{ loop.index | string | rjust(2,'0') }}</td>
+                <td>{{ t[0]|join(" ") }} &nbsp; <strong>{{ "%02d"|format(t[1]) }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted small">No tickets.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="box">
+      <h3>Illinois Lotto (15)</h3>
+      {% set lst = res.buy_lists.il %}
+      {% if lst and lst|length>0 %}
+        <table class="small">
+          <thead><tr><th>#</th><th>Ticket</th></tr></thead>
+          <tbody>
+            {% for t in lst %}
+              <tr>
+                <td>{{ loop.index | string | rjust(2,'0') }}</td>
+                <td>{{ t|join(" ") }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted small">No tickets.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Saved path -->
+  {% if res.saved_path %}
+    <p class="small"><strong>Saved buy list:</strong> <code>{{ res.saved_path }}</code></p>
   {% endif %}
-  <pre>{{ pre }}</pre>
-  <p><a href="/">← back</a></p>
+
+  <!-- Phase 3 -->
+  {% if res.phase3 %}
+    <h2>Phase 3 — Confirmation vs NWJ</h2>
+    <div class="grid grid-2">
+      {% for section in ["mm","pb","il"] %}
+      <div class="box">
+        <h3>
+          {% if section=="mm" %}Mega Millions{% elif section=="pb" %}Powerball{% else %}Illinois Lotto{% endif %}
+        </h3>
+
+        {% set p3 = res.phase3.get(section) %}
+        {% if p3 %}
+          {% if p3.totals %}
+          <table class="small">
+            <thead><tr>{% for k,v in p3.totals.items() %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+            <tbody><tr>{% for k,v in p3.totals.items() %}<td>{{ v }}</td>{% endfor %}</tr></tbody>
+          </table>
+          {% endif %}
+
+          {% if p3.lines and p3.lines|length>0 %}
+            <p class="small"><strong>Detailed rows (≥3 or 2+bonus):</strong></p>
+            <ul class="small">
+              {% for l in p3.lines %}<li>{{ l }}</li>{% endfor %}
+            </ul>
+          {% else %}
+            <p class="muted small">No qualifying hits.</p>
+          {% endif %}
+        {% else %}
+          <p class="muted small">No confirmation data.</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% endif %}
+
 </body>
 </html>
