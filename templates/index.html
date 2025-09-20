@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lottery Optimizer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Lottery Optimizer</h1>
+    <p class="muted">
+      Phase 1 evaluates vs NJ (new jackpot). Phase 2 runs 100×50 batches to generate stats and buy lists.
+    </p>
+
+    <section class="card">
+      <h2>Phase 1 — Evaluation</h2>
+      <form id="phase1-form">
+        <fieldset>
+          <legend>Latest jackpots (NJ)</legend>
+          <label>MM latest (main,mb) — e.g. <code>[10,14,34,40,43], 5</code>
+            <input name="LATEST_MM" placeholder="[10,14,34,40,43], 5" required />
+          </label>
+          <label>PB latest (main,pb)
+            <input name="LATEST_PB" placeholder="[14,15,32,42,49], 1" required />
+          </label>
+          <label>IL JP latest (6 mains)
+            <input name="LATEST_IL_JP" placeholder="[1,4,5,10,18,49]" required />
+          </label>
+          <label>IL M1 latest (6 mains)
+            <input name="LATEST_IL_M1" placeholder="[6,8,10,18,26,27]" required />
+          </label>
+          <label>IL M2 latest (6 mains)
+            <input name="LATEST_IL_M2" placeholder="[2,18,21,27,43,50]" required />
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Feeds (Lottery Defeated)</legend>
+          <label>FEED_MM (paste the 8 hot/overdue + 3 MB hot/overdue)
+            <textarea name="FEED_MM" rows="6" placeholder="Top 8 hot numbers: ..."></textarea>
+          </label>
+          <label>FEED_PB
+            <textarea name="FEED_PB" rows="6" placeholder="Top 8 hot numbers: ..."></textarea>
+          </label>
+          <label>FEED_IL
+            <textarea name="FEED_IL" rows="4" placeholder="Top 8 hot numbers: ..."></textarea>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>History blobs (top 20 kept)</legend>
+          <label>HIST_MM_BLOB
+            <textarea name="HIST_MM_BLOB" rows="10" placeholder="17-18-21-42-64 07&#10;..."></textarea>
+          </label>
+          <label>HIST_PB_BLOB
+            <textarea name="HIST_PB_BLOB" rows="10" placeholder="28-37-42-50-53 19&#10;..."></textarea>
+          </label>
+          <label>HIST_IL_BLOB
+            <textarea name="HIST_IL_BLOB" rows="10" placeholder="05-06-14-15-48-49&#10;..."></textarea>
+          </label>
+        </fieldset>
+
+        <button type="submit">Run Phase 1</button>
+      </form>
+
+      <pre id="phase1-output" class="output"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Phase 2 — Prediction</h2>
+      <form id="phase2-form">
+        <label>Saved Phase 1 state file (from /run_json response)
+          <input name="saved_path" placeholder="e.g., /tmp/lotto_2025-09-20_14-07-33.json" required />
+        </label>
+        <button type="submit">Run Phase 2 (100×)</button>
+      </form>
+      <pre id="phase2-output" class="output"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Phase 3 — Confirmation</h2>
+      <form id="phase3-form">
+        <label>Saved Phase 2 state file
+          <input name="saved_path" placeholder="e.g., /tmp/lotto_2025-09-20_14-18-02.json" required />
+        </label>
+        <label>NWJ (same format as Phase 1 LATEST_* inputs if changed)
+          <textarea name="NWJ" rows="6" placeholder='{"LATEST_MM":[[10,14,34,40,43],5], "LATEST_PB":[[14,15,32,42,49],1], "LATEST_IL_JP":[[1,4,5,10,18,49],null], "LATEST_IL_M1":[[6,8,10,18,26,27],null], "LATEST_IL_M2":[[2,18,21,27,43,50],null]}'></textarea>
+        </label>
+        <button type="submit">Confirm vs NWJ</button>
+      </form>
+      <pre id="phase3-output" class="output"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Recent Files</h2>
+      <button id="btn-recent">GET /recent</button>
+      <pre id="recent-output" class="output"></pre>
+    </section>
+
+    <footer class="muted">© Your Project — Deployed on Render</footer>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
