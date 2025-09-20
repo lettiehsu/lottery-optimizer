@@ -4,6 +4,18 @@ import os, traceback
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
+@app.template_filter("rjust")
+def rjust_filter(s, width=0, fillchar=" "):
+    # Jinja filter to right-justify strings (like Python's str.rjust)
+    s = "" if s is None else str(s)
+    try:
+        w = int(width)
+    except Exception:
+        w = 0
+    f = str(fillchar)[0] if fillchar else " "
+    return s.rjust(w, f)
+
+
 # ── Import lottery_core safely ────────────────────────────────────────────────
 try:
     import lottery_core as core
