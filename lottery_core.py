@@ -104,11 +104,19 @@ def parse_hist_blob_il(s: str) -> List[List[int]]:
     return out[:20]
 
 def parse_feed_mm_pb(s: str) -> Dict[str, List[int]]:
+    """
+    Parse FEED_MM or FEED_PB blocks robustly.
+    We capture the whole line after the colon and then extract ONLY digits via re.findall,
+    so words like 'Mega' or 'Power' are ignored safely.
+    """
     s = s or ""
-    def find_nums(label: str) -> List[int]:
-        m = re.search(label + r"\s*:\s*([0-9,\s]+)", s, flags=re.I)
-        if not m: return []
-        return [int(x) for x in m.group(1).replace(" ", "").split(",") if x]
+
+    def find_nums(label_regex: str) -> List[int]:
+        m = re.search(label_regex + r"\s*:\s*([^\r\n]+)", s, flags=re.I)
+        if not m:
+            return []
+        return [int(x) for x in re.findall(r"\d+", m.group(1))]
+
     hot = find_nums(r"Top\s+8\s+hot\s+numbers")
     overdue = find_nums(r"Top\s+8\s+overdue\s+numbers")
     b_hot = find_nums(r"Top\s+3\s+hot\s+(Mega|Power)\s*Ball\s+numbers")
@@ -116,11 +124,17 @@ def parse_feed_mm_pb(s: str) -> Dict[str, List[int]]:
     return {"hot": hot, "overdue": overdue, "bonus_hot": b_hot, "bonus_overdue": b_over}
 
 def parse_feed_il(s: str) -> Dict[str, List[int]]:
+    """
+    Parse FEED_IL with the same robust digit-only extraction.
+    """
     s = s or ""
-    def find_nums(label: str) -> List[int]:
-        m = re.search(label + r"\s*:\s*([0-9,\s]+)", s, flags=re.I)
-        if not m: return []
-        return [int(x) for x in m.group(1).replace(" ", "").split(",") if x]
+
+    def find_nums(label_regex: str) -> List[int]:
+        m = re.search(label_regex + r"\s*:\s*([^\r\n]+)", s, flags=re.I)
+        if not m:
+            return []
+        return [int(x) for x in re.findall(r"\d+", m.group(1))]
+
     hot = find_nums(r"Top\s+8\s+hot\s+numbers")
     overdue = find_nums(r"Top\s+8\s+overdue\s+numbers")
     return {"hot": hot, "overdue": overdue}
