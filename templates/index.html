@@ -6,31 +6,35 @@
   <title>Lottery Optimizer</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
-    .section { background:#0f172a; border:1px solid #16213e; border-radius:14px; padding:16px; margin:18px 0; }
-    .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:none; background:#3b82f6; color:#fff; font-weight:600; cursor:pointer; }
-    .btn.secondary { background:#0ea5e9; }
+    :root { color-scheme: light; }
+    body { background:#ffffff; color:#0f172a; max-width:1100px; margin:0 auto; padding:22px; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    a { color:#1d4ed8; }
+    .section { background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:16px; margin:18px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid #2563eb; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; }
+    .btn.secondary { background:#0ea5e9; border-color:#0ea5e9; }
     .btn:disabled { opacity:.6; cursor:not-allowed; }
     .row { display:flex; flex-wrap:wrap; gap:12px; }
     .col { flex:1 1 360px; min-width:320px; }
-    label { display:block; font-weight:600; margin:10px 0 6px; color:#e2e8f0;}
-    input, textarea { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #233; background:#0b1220; color:#e5e7eb; }
-    h1 { color:#e5e7eb; margin:22px 0 12px; }
-    h2 { color:#e5e7eb; margin:8px 0 16px; font-size:18px; }
-    .muted { color:#94a3b8; font-size:13px; }
-    .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; margin-top:12px; }
-    .card { background:#0b1220; border:1px solid #1f2937; border-radius:12px; padding:12px; }
-    .card h3 { margin:0 0 6px; color:#e5e7eb; font-size:16px; }
-    .kv { display:flex; justify-content:space-between; padding:4px 0; font-family:ui-monospace,Menlo,Consolas,monospace; color:#cbd5e1;}
+    label { display:block; font-weight:600; margin:10px 0 6px; color:#0f172a;}
+    input, textarea { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #d1d5db; background:#ffffff; color:#0f172a; }
+    h1 { color:#0f172a; margin:22px 0 12px; }
+    h2 { color:#0f172a; margin:8px 0 16px; font-size:18px; }
+    .muted { color:#64748b; font-size:13px; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; margin-top:12px; }
+    .card { background:#ffffff; border:1px solid #e5e7eb; border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .card h3 { margin:0 0 6px; color:#0f172a; font-size:16px; }
+    .kv { display:flex; justify-content:space-between; padding:4px 0; font-family:ui-monospace,Menlo,Consolas,monospace; color:#0f172a;}
     .mono { font-family:ui-monospace, Menlo, Consolas, monospace; }
     table.tbl { width:100%; border-collapse:collapse; font-family:ui-monospace, Menlo, Consolas, monospace; }
-    .tbl th, .tbl td { border-bottom:1px dashed #243047; padding:6px 8px; text-align:left; color:#cbd5e1;}
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#111827; border:1px solid #233; margin:2px 2px 0 0; }
-    .okline { margin:8px 0; color:#a7f3d0; }
-    .copy { margin-left:8px; font-size:12px; background:#111827; border:1px solid #334155; color:#e5e7eb; padding:4px 8px; border-radius:8px; cursor:pointer; }
-    pre.raw { white-space:pre-wrap; word-break:break-word; background:#0b1220; border:1px dashed #243047; padding:10px; border-radius:10px; color:#9ca3af; }
+    .tbl th, .tbl td { border-bottom:1px dashed #e5e7eb; padding:6px 8px; text-align:left; color:#0f172a;}
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; border:1px solid #c7d2fe; margin:2px 2px 0 0; color:#1e3a8a; }
+    .okline { margin:8px 0; color:#065f46; }
+    .copy { margin-left:8px; font-size:12px; background:#f3f4f6; border:1px solid #d1d5db; color:#111827; padding:4px 8px; border-radius:8px; cursor:pointer; }
+    ul.hitlist { margin:6px 0 0 18px; padding:0; }
+    ul.hitlist li { margin:2px 0; font-family:ui-monospace, Menlo, Consolas, monospace; }
   </style>
 </head>
-<body style="background:#0a0f1d; color:#e5e7eb; max-width:980px; margin:0 auto; padding:22px;">
+<body>
   <h1>Lottery Optimizer</h1>
   <div class="muted">Phase 1 evaluates vs the new jackpot (NJ). Phase 2 runs 100×50 batches to build buy lists. Phase 3 confirms buy lists vs the newest winning jackpot (NWJ).</div>
 
