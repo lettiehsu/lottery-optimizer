@@ -1,249 +1,168 @@
-# lottery_core.py  — minimal, boot-safe version
+# lottery_core.py — safe boot version (no heavy math yet)
 from __future__ import annotations
-import os, json, random, datetime as dt
+import os, json, datetime as dt
+from typing import Dict, List, Tuple, Optional
 
-SAVE_DIR = "buylists"
-os.makedirs(SAVE_DIR, exist_ok=True)
+# Where we save files on Render
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+BUY_DIR = os.path.join(DATA_DIR, "buylists")
+os.makedirs(BUY_DIR, exist_ok=True)
 
-# ───────────────── helpers ─────────────────
+def _now_stamp() -> str:
+    return dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-def _parse_list_or_none(s: str):
-    s = (s or "").strip()
-    if not s:
+def _parse_latest(s: str, expect_bonus: bool) -> Optional[Tuple[List[int], Optional[int]]]:
+    """
+    Accepts "10,14,34,40,43;5" (with ;bonus) or "10,14,34,40,43" (no bonus).
+    Returns (mains, bonus|None) or None if empty.
+    """
+    if not s or not s.strip():
         return None
-    # Accept "[1,2,3,4,5]" or "1,2,3,4,5"
-    try:
-        s2 = s
-        if s2.startswith("[") and s2.endswith("]"):
-            s2 = s2[1:-1]
-        return [int(x.strip()) for x in s2.split(",") if x.strip()]
-    except Exception:
-        raise ValueError(f"Bad list input: {s!r}")
-
-def _parse_mm_pb(s: str):
-    s = (s or "").strip()
-    if not s:
-        return None
-    # Accept "[1,2,3,4,5],6" or "1,2,3,4,5,6" (last is bonus)
-    if "]" in s:
-        left, _, right = s.partition("]")
-        mains = _parse_list_or_none(left + "]")
-        bonus = int(right.lstrip(",").strip())
+    s = s.strip().strip("[](){} ").replace(" ", "")
+    if ";" in s:
+        mains_str, bonus_str = s.split(";", 1)
+        mains = [int(x) for x in mains_str.split(",") if x]
+        bonus = int(bonus_str) if expect_bonus else None
+        return (mains, bonus)
     else:
-        parts = [p.strip() for p in s.split(",") if p.strip()]
-        if len(parts) < 6:
-            raise ValueError(f"Need 5 mains + bonus, got: {s!r}")
-        mains = [int(x) for x in parts[:-1]]
-        bonus = int(parts[-1])
-    if len(mains) != 5:
-        raise ValueError(f"Need exactly 5 mains, got {len(mains)} in {s!r}")
-    return (sorted(mains), bonus)
+        mains = [int(x) for x in s.split(",") if x]
+        bonus = None
+        if expect_bonus:
+            # allow trailing ",b" style too
+            if len(mains) >= 6:
+                *m, b = mains
+                return (m, int(b))
+        return (mains, bonus)
 
-def _overlap(a, b): return len(set(a) & set(b))
+def _blank_phase1_block():
+    return {
+        "batch": [],        # list of strings to print (50 rows normally)
+        "hits_lines": [],   # list of strings like "row #07: 3-ball"
+    }
 
-def _mk_batch_5pick(n_rows, max_num, bonus_max, seed):
-    random.seed(seed)
-    seen = set(); out = []
-    while len(out) < n_rows:
-        mains = tuple(sorted(random.sample(range(1, max_num+1), 5)))
-        bonus = random.randint(1, bonus_max)
-        key = (mains, bonus)
-        if key not in seen:
-            seen.add(key); out.append((list(mains), bonus))
-    return out
+def _blank_phase2_stats():
+    return {
+        "mm": {"totals": {}, "top_positions": []},
+        "pb": {"totals": {}, "top_positions": []},
+        "il": {"totals": {}, "top_positions": []},
+    }
 
-def _mk_batch_6pick(n_rows, max_num, seed):
-    random.seed(seed)
-    seen = set(); out = []
-    while len(out) < n_rows:
-        mains = tuple(sorted(random.sample(range(1, max_num+1), 6)))
-        if mains not in seen:
-            seen.add(mains); out.append(list(mains))
-    return out
+def _fmt_mm_pb_row(mains: List[int], bonus: Optional[int]) -> str:
+    mains_txt = " ".join(f"{n:02d}" for n in mains)
+    btxt = f"{bonus:02d}" if bonus is not None else "--"
+    return f"{mains_txt}   {btxt}"
 
-def _save_buylists(mm_list, pb_list, il_list):
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+def _fmt_il_row(mains: List[int]) -> str:
+    return " ".join(f"{n:02d}" for n in mains)
+
+def run_phase_1_and_2(config: Dict) -> Dict:
+    """
+    Returns a printable structure the UI expects.
+    This SAFE version:
+      - echoes your LATEST_* inputs as a fake 'batch' so pages render
+      - writes a tiny buy list JSON to /data/buylists/
+    """
+    # Parse LATEST_* from form (strings)
+    latest_mm = _parse_latest(config.get("LATEST_MM",""), expect_bonus=True)
+    latest_pb = _parse_latest(config.get("LATEST_PB",""), expect_bonus=True)
+    latest_il_jp = _parse_latest(config.get("LATEST_IL_JP",""), expect_bonus=False)
+    latest_il_m1 = _parse_latest(config.get("LATEST_IL_M1",""), expect_bonus=False)
+    latest_il_m2 = _parse_latest(config.get("LATEST_IL_M2",""), expect_bonus=False)
+
+    # Phase 1 “batches” (dummy: just a few rows so page renders)
+    mm_block = _blank_phase1_block()
+    pb_block = _blank_phase1_block()
+    il_block = _blank_phase1_block()
+
+    if latest_mm:
+        mm_block["batch"] = [
+            f"01. {_fmt_mm_pb_row(latest_mm[0], latest_mm[1])}",
+            "02. 01 02 03 04 05   01",
+            "03. 06 07 08 09 10   02",
+        ]
+    if latest_pb:
+        pb_block["batch"] = [
+            f"01. {_fmt_mm_pb_row(latest_pb[0], latest_pb[1])}",
+            "02. 11 12 13 14 15   03",
+            "03. 21 22 23 24 25   04",
+        ]
+    if latest_il_jp:
+        il_block["batch"] = [
+            f"01. {_fmt_il_row(latest_il_jp[0])}",
+            "02. 01 02 03 04 05 06",
+            "03. 07 08 09 10 11 12",
+        ]
+        # Fake hits so the section shows something
+        il_block["hits_lines"] = ["  row #01: 3-ball"]
+
+    # Phase 2 stats (dummy)
+    phase2 = _blank_phase2_stats()
+    phase2["il"]["totals"] = {"3": 1, "4": 0, "5": 0, "6": 0}
+    phase2["il"]["top_positions"] = [(1, 1), (2, 0), (3, 0)]
+
+    # “Buy lists” — fabricate a few rows, save them, and return the path
+    mm_buy = [([1,2,3,4,5], 1), ([6,7,8,9,10], 2)]
+    pb_buy = [([1,3,5,7,9], 2), ([2,4,6,8,10], 3)]
+    il_buy = [[1,2,3,4,5,6], [7,8,9,10,11,12], [3,13,23,33,43,49]]
+
     payload = {
-        "timestamp": stamp,
-        "MM": [[t[0], t[1]] for t in mm_list],
-        "PB": [[t[0], t[1]] for t in pb_list],
-        "IL": [list(t) for t in il_list],
+        "timestamp": _now_stamp(),
+        "LATEST_MM": latest_mm,
+        "LATEST_PB": latest_pb,
+        "LATEST_IL_JP": latest_il_jp,
+        "LATEST_IL_M1": latest_il_m1,
+        "LATEST_IL_M2": latest_il_m2,
+        "MM": [[m,b] for (m,b) in mm_buy],
+        "PB": [[m,b] for (m,b) in pb_buy],
+        "IL": il_buy,
     }
-    path = os.path.join(SAVE_DIR, f"buy_session_{stamp}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-    return path
-
-def _load_buylists(path):
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    mm = [(list(item[0]), int(item[1])) for item in data.get("MM", [])]
-    pb = [(list(item[0]), int(item[1])) for item in data.get("PB", [])]
-    il = [list(map(int, row)) for row in data.get("IL", [])]
-    return mm, pb, il
-
-# ─────────────── public API used by app.py ───────────────
-
-def run_phase_1_and_2(cfg: dict) -> dict:
-    """Build 50-row batches, do simple Phase-1 hit check, toy Phase-2 counts, save buy list."""
-    # Parse “LATEST_*” inputs (blank is allowed)
-    latest_mm = None
-    latest_pb = None
+    saved_path = os.path.join(BUY_DIR, f"buy_session_{_now_stamp()}.json")
     try:
-        if cfg.get("LATEST_MM"): latest_mm = _parse_mm_pb(cfg["LATEST_MM"])
-        if cfg.get("LATEST_PB"): latest_pb = _parse_mm_pb(cfg["LATEST_PB"])
+        with open(saved_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
     except Exception as e:
-        # Surface a readable message back to the UI
-        return {"error": f"Parse error (MM/PB): {e}"}
-
-    latest_il_jp = _parse_list_or_none(cfg.get("LATEST_IL_JP", ""))
-    latest_il_m1 = _parse_list_or_none(cfg.get("LATEST_IL_M1", ""))
-    latest_il_m2 = _parse_list_or_none(cfg.get("LATEST_IL_M2", ""))
-
-    runs = int(cfg.get("runs") or 100)
-
-    # Generate simple placeholder batches (swap with your optimizer later)
-    mm_batch = _mk_batch_5pick(50, 70, 25, seed=777)
-    pb_batch = _mk_batch_5pick(50, 69, 26, seed=888)
-    il_batch = _mk_batch_6pick(50, 50, seed=999)
-
-    # Phase-1 hits (rows only)
-    def _hits_mm_pb(batch, target):
-        rows = []
-        if not target: return rows
-        tgt_m, tgt_b = target
-        for i, (mains, b) in enumerate(batch, 1):
-            m = _overlap(mains, tgt_m); bh = (b == tgt_b)
-            if m >= 3 or (m >= 2 and bh):
-                rows.append({"row": i, "mains": mains, "bonus": b, "m": m, "bonus_hit": bh})
-        return rows
-
-    def _hits_il(batch, target):
-        rows = []
-        if not target: return rows
-        for i, mains in enumerate(batch, 1):
-            m = _overlap(mains, target)
-            if m >= 3:
-                rows.append({"row": i, "mains": mains, "m": m})
-        return rows
-
-    phase1 = {
-        "mm": {"batch": mm_batch, "hits": _hits_mm_pb(mm_batch, latest_mm)},
-        "pb": {"batch": pb_batch, "hits": _hits_mm_pb(pb_batch, latest_pb)},
-        "il": {
-            "batch": il_batch,
-            "hits_jp": _hits_il(il_batch, latest_il_jp),
-            "hits_m1": _hits_il(il_batch, latest_il_m1),
-            "hits_m2": _hits_il(il_batch, latest_il_m2),
-        },
-    }
-
-    # Toy Phase-2 counts (not your full sim — just to keep UI happy)
-    def _sim_mm_pb(target, max_num, bonus_max, base_seed):
-        types = {"3":0,"3+":0,"4":0,"4+":0,"5":0,"5+":0}
-        if not target: return types
-        tgt_m, tgt_b = target
-        for r in range(runs):
-            batch = _mk_batch_5pick(50, max_num, bonus_max, seed=base_seed+r)
-            for mains, b in batch:
-                m = _overlap(mains, tgt_m); bh = (b == tgt_b)
-                if   m==3 and not bh: types["3"]  += 1
-                elif m==3 and bh:     types["3+"] += 1
-                elif m==4 and not bh: types["4"]  += 1
-                elif m==4 and bh:     types["4+"] += 1
-                elif m==5 and not bh: types["5"]  += 1
-                elif m==5 and bh:     types["5+"] += 1
-        return types
-
-    def _sim_il(targets, base_seed):
-        types = {"3":0,"4":0,"5":0,"6":0}
-        if not any(targets): return types
-        for r in range(runs):
-            batch = _mk_batch_6pick(50, 50, seed=base_seed+r)
-            for mains in batch:
-                best = 0
-                for tgt in targets:
-                    if tgt: best = max(best, _overlap(mains, tgt))
-                if best>=3: types["3"] += 1
-                if best>=4: types["4"] += 1
-                if best>=5: types["5"] += 1
-                if best==6: types["6"] += 1
-        return types
-
-    phase2_stats = {
-        "mm": _sim_mm_pb(latest_mm, 70, 25, 17000),
-        "pb": _sim_mm_pb(latest_pb, 69, 26, 18000),
-        "il": _sim_il([latest_il_jp, latest_il_m1, latest_il_m2], 19000),
-    }
-
-    # Recommend first 10/10/15 (placeholder) and save
-    mm_buy = mm_batch[:10]; pb_buy = pb_batch[:10]; il_buy = il_batch[:15]
-    saved_path = _save_buylists(mm_buy, pb_buy, il_buy)
+        saved_path = f"<save error: {e}>"
 
     return {
-        "phase1": phase1,
-        "phase2_stats": phase2_stats,
-        "buylists": {"mm": mm_buy, "pb": pb_buy, "il": il_buy},
+        "phase1": {"mm": mm_block, "pb": pb_block, "il": il_block},
+        "phase2": phase2,
+        "buy_lists": {"mm": mm_buy, "pb": pb_buy, "il": il_buy},
         "saved_path": saved_path,
     }
 
-def confirm_phase_3(saved_file: str, nwj: dict, recall_headings: bool=False) -> dict:
-    mm_buy, pb_buy, il_buy = _load_buylists(saved_file)
-    out = {"saved_file": saved_file, "recall_headings": recall_headings}
+def confirm_phase_3(saved_file: str, nwj: Dict, recall_phase12_from_file: bool = True) -> Dict:
+    """
+    Loads the saved buy list JSON and compares against NWJ_* you provide.
+    SAFE version: just loads and echoes. No scoring logic yet.
+    """
+    full = saved_file
+    if not os.path.isabs(full):
+        full = os.path.join(BUY_DIR, os.path.basename(saved_file))
+    if not os.path.exists(full):
+        return {"error": f"Saved buy list not found: {full}"}
+    with open(full, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    mm = pb = None
-    try:
-        if nwj.get("mm"): mm = _parse_mm_pb(nwj["mm"])
-        if nwj.get("pb"): pb = _parse_mm_pb(nwj["pb"])
-    except Exception as e:
-        return {"error": f"Parse error (NWJ MM/PB): {e}"}
-
-    il_jp  = _parse_list_or_none(nwj.get("il_jp"))
-    il_m1  = _parse_list_or_none(nwj.get("il_m1"))
-    il_m2  = _parse_list_or_none(nwj.get("il_m2"))
-
-    if mm:
-        tgt_m, tgt_b = mm
-        tiers = {"2+":0,"3":0,"3+":0,"4":0,"4+":0,"5":0,"5+":0}
-        rows = []
-        for i,(mains,b) in enumerate(mm_buy,1):
-            m=_overlap(mains,tgt_m); bh=(b==tgt_b)
-            if m==2 and bh: tiers["2+"]+=1
-            if m==3: tiers["3"]+=1
-            if m==3 and bh: tiers["3+"]+=1
-            if m==4: tiers["4"]+=1
-            if m==4 and bh: tiers["4+"]+=1
-            if m==5: tiers["5"]+=1
-            if m==5 and bh: tiers["5+"]+=1
-            if m>=3 or (m>=2 and bh): rows.append({"buy_index":i,"m":m,"bonus_hit":bh})
-        out["mm"]={"totals":tiers,"rows":rows}
-
-    if pb:
-        tgt_m, tgt_b = pb
-        tiers = {"2+":0,"3":0,"3+":0,"4":0,"4+":0,"5":0,"5+":0}
-        rows = []
-        for i,(mains,b) in enumerate(pb_buy,1):
-            m=_overlap(mains,tgt_m); bh=(b==tgt_b)
-            if m==2 and bh: tiers["2+"]+=1
-            if m==3: tiers["3"]+=1
-            if m==3 and bh: tiers["3+"]+=1
-            if m==4: tiers["4"]+=1
-            if m==4 and bh: tiers["4+"]+=1
-            if m==5: tiers["5"]+=1
-            if m==5 and bh: tiers["5+"]+=1
-            if m>=3 or (m>=2 and bh): rows.append({"buy_index":i,"m":m,"bonus_hit":bh})
-        out["pb"]={"totals":tiers,"rows":rows}
-
-    if any([il_jp, il_m1, il_m2]):
-        tiers={2:0,3:0,4:0,5:0,6:0}; rows=[]
-        for i,mains in enumerate(il_buy,1):
-            best=0; label=None
-            for name,tgt in (("Jackpot",il_jp),("Million 1",il_m1),("Million 2",il_m2)):
-                if tgt:
-                    hits=_overlap(mains,tgt)
-                    if hits>best: best,label=hits,name
-            if best>=2: tiers[min(6,max(2,best))]+=1
-            if best>=3: rows.append({"buy_index":i,"m":best,"vs":label})
-        out["il"]={"totals":tiers,"rows":rows}
-
+    # Just echo back what we got
+    out = {
+        "loaded_file": full,
+        "tickets_counts": {
+            "MM": len(data.get("MM", [])),
+            "PB": len(data.get("PB", [])),
+            "IL": len(data.get("IL", [])),
+        },
+        "nwj": nwj,
+        "recall_phase12": None,
+        "details": {
+            "message": "SAFE confirm: scoring disabled in this boot version."
+        }
+    }
+    if recall_phase12_from_file:
+        out["recall_phase12"] = {
+            "LATEST_MM": data.get("LATEST_MM"),
+            "LATEST_PB": data.get("LATEST_PB"),
+            "LATEST_IL_JP": data.get("LATEST_IL_JP"),
+            "LATEST_IL_M1": data.get("LATEST_IL_M1"),
+            "LATEST_IL_M2": data.get("LATEST_IL_M2"),
+        }
     return out
