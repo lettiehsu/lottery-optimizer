@@ -43,3 +43,5 @@ legend { color: var(--muted); font-size: 0.9rem; padding: 0 0.3rem; }
 }
 footer { margin-top: 2rem; text-align: center; }
 code { background: #0a121a; padding: 0.05rem 0.35rem; border-radius: 6px; border: 1px solid var(--border); }
+/* pretty results additions */
+.section .card { box-shadow: 0 0 0 1px rgba(59,130,246,.1) inset; }
