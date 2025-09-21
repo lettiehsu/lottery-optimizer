@@ -1,8 +1,8 @@
 /* static/app.js — light theme UI with:
    - Phase 1: bands, summary hits, exact hit rows (above), 50-row tables (below)
-   - Phase 2: buy list tables + aggregated 100× hit stats
+   - Phase 2: buy list tables + aggregated 100× hit stats (robust to array/map/number)
    - Phase 3: confirmation hits vs NWJ
-   - Recent saved files
+   - Recent saved files list
 */
 
 /* ------------------ helpers ------------------ */
@@ -121,24 +121,50 @@ function renderBuyTable(title, list, hasBonus=true) {
   c.append(tbl); return c;
 }
 
+/* Robust: supports arrays, maps, or numbers */
 function renderAggHits(title, agg, withBonus=false) {
   const c = el("div","card"); c.append(el("h3","",title));
   const cols = withBonus ? ["3","3B","4","4B","5","5B"] : ["3","4","5","6"];
   const tbl = el("table","tbl");
-  const thead = el("thead"); thead.innerHTML = `<tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr>`;
+  const thead = el("thead");
+  thead.innerHTML = `<tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr>`;
   const tbody = el("tbody");
-  const topK = (arr, k=6) => {
-    const m = new Map();
-    (arr||[]).forEach(p => m.set(p,(m.get(p)||0)+1));
-    return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k).map(([p,cnt])=>`${p}(${cnt})`).join(", ");
-  };
+
+  function normalize(v) {
+    // 1) array of positions
+    if (Array.isArray(v)) {
+      const m = new Map();
+      v.forEach(p => m.set(p,(m.get(p)||0)+1));
+      return { total: v.length, posMap: m };
+    }
+    // 2) object map {pos: count}
+    if (v && typeof v === "object") {
+      let total = 0; const m = new Map();
+      for (const [pos, cnt] of Object.entries(v)) {
+        const n = Number(cnt)||0; total += n; m.set(pos,(m.get(pos)||0)+n);
+      }
+      return { total, posMap: m };
+    }
+    // 3) number only
+    if (typeof v === "number") return { total: v, posMap: null };
+    return { total: 0, posMap: null };
+  }
+  function topPositions(posMap, k=6) {
+    if (!posMap) return "—";
+    const arr = [...posMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k);
+    if (!arr.length) return "—";
+    return arr.map(([p,c])=>`${p}(${c})`).join(", ");
+  }
+
   cols.forEach(k=>{
-    const arr = agg?.[k] || [];
+    const { total, posMap } = normalize(agg?.[k]);
     const tr = el("tr");
-    tr.innerHTML = `<td>${k}</td><td class="mono">${arr.length}</td><td class="mono">${arr.length? topK(arr) : "—"}</td>`;
+    tr.innerHTML = `<td>${k}</td><td class="mono">${total}</td><td class="mono">${topPositions(posMap)}</td>`;
     tbody.append(tr);
   });
-  tbl.append(thead, tbody); c.append(tbl);
+
+  tbl.append(thead, tbody);
+  c.append(tbl);
   return c;
 }
 
@@ -250,7 +276,7 @@ async function runPhase2() {
   buyWrap.append(renderBuyTable("IL — buy list (15 tickets)", buys.IL || [], false));
   out.append(buyWrap);
 
-  // Aggregated hits across 100 runs
+  // Aggregated hits across 100 runs (robust)
   const agg = data.agg_hits || {};
   const aggWrap = el("div","cards");
   aggWrap.append(renderAggHits("MM — 100× aggregated hits", agg.MM || {}, true));
