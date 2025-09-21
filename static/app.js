@@ -40,17 +40,45 @@
   }
 
   // -------- CSV Upload ----------
-  $("csv_form").addEventListener("submit", async (e)=>{
-    e.preventDefault();
-    const file = $("csv_file").files[0];
-    if (!file) { alert("Choose a CSV file"); return; }
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("overwrite", $("overwrite").checked ? "1":"0");
-    const res = await fetch("/hist_upload", { method: "POST", body: fd });
-    const j = await res.json().catch(()=>null);
-    $("import_out").textContent = j ? JSON.stringify(j, null, 2) : await res.text();
-  });
+  // -------- CSV Upload ----------
+  (function wireCsvUpload(){
+    const fileEl = $("csv_file");
+    const lblEl  = $("csv_selected");
+    const outEl  = $("import_out");
+    const btn    = $("btn_import");
+  
+    // show selected filename
+    fileEl.addEventListener("change", () => {
+      const f = fileEl.files && fileEl.files[0];
+      lblEl.textContent = f ? `Selected: ${f.name} (${f.size.toLocaleString()} bytes)` : "—";
+    });
+  
+    btn.addEventListener("click", async () => {
+      try {
+        const file = fileEl.files && fileEl.files[0];
+        if (!file) { alert("Choose a CSV file"); return; }
+  
+        const fd = new FormData();
+        fd.append("file", file);                              // <-- field name 'file'
+        fd.append("overwrite", $("overwrite").checked ? "1":"0");
+  
+        outEl.textContent = "Uploading...";
+        const res = await fetch("/hist_upload", { method: "POST", body: fd });
+  
+        const text = await res.text();
+        try {
+          const j = JSON.parse(text);
+          outEl.textContent = JSON.stringify(j, null, 2);
+          if (!res.ok) alert(`Upload failed: ${j.detail || res.status}`);
+        } catch {
+          outEl.textContent = text;
+          if (!res.ok) alert(`Upload failed (non-JSON): HTTP ${res.status}`);
+        }
+      } catch (err) {
+        alert("Upload error: " + (err?.message || err));
+      }
+    });
+  })();
 
   // -------- History Slice helpers ----------
   async function historySlice(game, tier, pivotMDY, limit=20) {
