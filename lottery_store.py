@@ -1,164 +1,197 @@
-# lottery_store.py — simple SQLite store for jackpot history + BLOB views
-import os, sqlite3, csv, io
-from typing import List, Optional
-from datetime import datetime
+# lottery_store.py — SQLite-backed history store with dated BLOB output
+from __future__ import annotations
+import os
+import sqlite3
+from typing import List
 
-# Tip: mount a Render Disk at /var/data and set DB_PATH=/var/data/lottery.db
-DB_PATH = os.environ.get("DB_PATH", "/var/data/lottery.db")
-
-SCHEMA = """
-PRAGMA journal_mode=WAL;
-CREATE TABLE IF NOT EXISTS mm_draws(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  draw_date TEXT NOT NULL,
-  n1 INTEGER NOT NULL, n2 INTEGER NOT NULL, n3 INTEGER NOT NULL, n4 INTEGER NOT NULL, n5 INTEGER NOT NULL,
-  bonus INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_mm_draws_date ON mm_draws(draw_date DESC);
-
-CREATE TABLE IF NOT EXISTS pb_draws(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  draw_date TEXT NOT NULL,
-  n1 INTEGER NOT NULL, n2 INTEGER NOT NULL, n3 INTEGER NOT NULL, n4 INTEGER NOT NULL, n5 INTEGER NOT NULL,
-  bonus INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_pb_draws_date ON pb_draws(draw_date DESC);
-
--- Illinois: one row per set (JP / M1 / M2)
-CREATE TABLE IF NOT EXISTS il_draws(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  draw_date TEXT NOT NULL,
-  tier TEXT NOT NULL CHECK(tier IN ('JP','M1','M2')),
-  n1 INTEGER NOT NULL, n2 INTEGER NOT NULL, n3 INTEGER NOT NULL, n4 INTEGER NOT NULL, n5 INTEGER NOT NULL, n6 INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_il_draws_date ON il_draws(draw_date DESC, tier);
-"""
+DB_PATH = os.environ.get("LOTTERY_DB", "lottery.db")
 
 def _conn():
-  os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-  con = sqlite3.connect(DB_PATH, timeout=15, check_same_thread=False)
-  con.row_factory = sqlite3.Row
-  return con
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    return con
 
 def init_db():
-  con = _conn()
-  try:
-    con.executescript(SCHEMA)
-    con.commit()
-  finally:
-    con.close()
+    con = _conn()
+    try:
+        cur = con.cursor()
+        # Mega Millions (5 mains + bonus)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS mm_draws (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            draw_date TEXT,         -- ISO YYYY-MM-DD if available
+            n1 INTEGER, n2 INTEGER, n3 INTEGER, n4 INTEGER, n5 INTEGER,
+            bonus INTEGER,          -- mega ball
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
 
-def _now_date():
-  # ISO date (UTC)
-  return datetime.utcnow().strftime("%Y-%m-%d")
+        # Powerball (5 mains + bonus)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS pb_draws (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            draw_date TEXT,
+            n1 INTEGER, n2 INTEGER, n3 INTEGER, n4 INTEGER, n5 INTEGER,
+            bonus INTEGER,          -- powerball
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
 
-def add_mm(main5: List[int], bonus: int, draw_date: Optional[str] = None):
-  draw_date = draw_date or _now_date()
-  n1,n2,n3,n4,n5 = [int(x) for x in main5]
-  con = _conn()
-  try:
-    con.execute(
-      "INSERT INTO mm_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-      (draw_date,n1,n2,n3,n4,n5,int(bonus))
-    )
-    con.commit()
-  finally:
-    con.close()
+        # IL Lotto jackpot/millions (6 mains, tier = 'JP' | 'M1' | 'M2')
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS il_draws (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            draw_date TEXT,
+            tier TEXT,              -- 'JP','M1','M2'
+            n1 INTEGER, n2 INTEGER, n3 INTEGER, n4 INTEGER, n5 INTEGER, n6 INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        con.commit()
+    finally:
+        con.close()
 
-def add_pb(main5: List[int], bonus: int, draw_date: Optional[str] = None):
-  draw_date = draw_date or _now_date()
-  n1,n2,n3,n4,n5 = [int(x) for x in main5]
-  con = _conn()
-  try:
-    con.execute(
-      "INSERT INTO pb_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-      (draw_date,n1,n2,n3,n4,n5,int(bonus))
-    )
-    con.commit()
-  finally:
-    con.close()
+# ----------------- Insert helpers -----------------
 
-def add_il(set6: List[int], tier: str, draw_date: Optional[str] = None):
-  assert tier in ("JP","M1","M2")
-  draw_date = draw_date or _now_date()
-  n1,n2,n3,n4,n5,n6 = [int(x) for x in set6]
-  con = _conn()
-  try:
-    con.execute(
-      "INSERT INTO il_draws(draw_date,tier,n1,n2,n3,n4,n5,n6) VALUES(?,?,?,?,?,?,?,?)",
-      (draw_date,tier,n1,n2,n3,n4,n5,n6)
-    )
-    con.commit()
-  finally:
-    con.close()
+def add_mm(mains5: List[int], bonus: int, draw_date: str | None = None):
+    if len(mains5) != 5:
+        raise ValueError("MM mains must be length 5")
+    con = _conn()
+    try:
+        con.execute(
+            "INSERT INTO mm_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
+            (draw_date, mains5[0], mains5[1], mains5[2], mains5[3], mains5[4], bonus)
+        )
+        con.commit()
+    finally:
+        con.close()
 
-# ----- Blob builders (latest first, limit default 20) -----
+def add_pb(mains5: List[int], bonus: int, draw_date: str | None = None):
+    if len(mains5) != 5:
+        raise ValueError("PB mains must be length 5")
+    con = _conn()
+    try:
+        con.execute(
+            "INSERT INTO pb_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
+            (draw_date, mains5[0], mains5[1], mains5[2], mains5[3], mains5[4], bonus)
+        )
+        con.commit()
+    finally:
+        con.close()
+
+def add_il(mains6: List[int], tier: str, draw_date: str | None = None):
+    if len(mains6) != 6:
+        raise ValueError("IL mains must be length 6")
+    if tier not in ("JP", "M1", "M2"):
+        raise ValueError("tier must be 'JP','M1','M2'")
+    con = _conn()
+    try:
+        con.execute(
+            "INSERT INTO il_draws(draw_date,tier,n1,n2,n3,n4,n5,n6) VALUES(?,?,?,?,?,?,?,?)",
+            (draw_date, tier, mains6[0], mains6[1], mains6[2], mains6[3], mains6[4], mains6[5])
+        )
+        con.commit()
+    finally:
+        con.close()
+
+# ----------------- Dated BLOB builders -----------------
+# These return newest-first lists of human-readable lines WITH the draw date.
+# Phase-1 inputs still expect undated lines, so use these for verification/CSV.
+
 def mm_blob(limit: int = 20) -> str:
-  con = _conn()
-  try:
-    rows = con.execute(
-      "SELECT n1,n2,n3,n4,n5,bonus FROM mm_draws ORDER BY draw_date DESC, id DESC LIMIT ?",
-      (limit,)
-    ).fetchall()
-    lines = [f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d} {int(r['bonus']):02d}" for r in rows]
-    return "\n".join(lines)
-  finally:
-    con.close()
+    con = _conn()
+    try:
+        rows = con.execute(
+            "SELECT draw_date,n1,n2,n3,n4,n5,bonus "
+            "FROM mm_draws ORDER BY "
+            "COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        lines: List[str] = []
+        for r in rows:
+            date = (r["draw_date"] or "").strip() or "????-??-??"
+            mains = f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}"
+            lines.append(f"{date} {mains} {int(r['bonus']):02d}")
+        return "\n".join(lines)
+    finally:
+        con.close()
 
 def pb_blob(limit: int = 20) -> str:
-  con = _conn()
-  try:
-    rows = con.execute(
-      "SELECT n1,n2,n3,n4,n5,bonus FROM pb_draws ORDER BY draw_date DESC, id DESC LIMIT ?",
-      (limit,)
-    ).fetchall()
-    lines = [f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d} {int(r['bonus']):02d}" for r in rows]
-    return "\n".join(lines)
-  finally:
-    con.close()
+    con = _conn()
+    try:
+        rows = con.execute(
+            "SELECT draw_date,n1,n2,n3,n4,n5,bonus "
+            "FROM pb_draws ORDER BY "
+            "COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        lines: List[str] = []
+        for r in rows:
+            date = (r["draw_date"] or "").strip() or "????-??-??"
+            mains = f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}"
+            lines.append(f"{date} {mains} {int(r['bonus']):02d}")
+        return "\n".join(lines)
+    finally:
+        con.close()
 
-def il_blob(limit: int = 20) -> str:
-  # We use the latest 20 JP rows to build HIST_IL_BLOB
-  con = _conn()
-  try:
-    rows = con.execute(
-      "SELECT n1,n2,n3,n4,n5,n6 FROM il_draws WHERE tier='JP' ORDER BY draw_date DESC, id DESC LIMIT ?",
-      (limit,)
-    ).fetchall()
-    lines = [f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}-{r['n6']:02d}" for r in rows]
-    return "\n".join(lines)
-  finally:
-    con.close()
+def il_blob(limit: int = 20, tier: str = "JP") -> str:
+    """
+    Return IL Lotto lines WITH dates. By default only Jackpot ('JP') lines,
+    newest first, like: 'YYYY-MM-DD 05-06-14-15-48-49'
+    """
+    con = _conn()
+    try:
+        rows = con.execute(
+            "SELECT draw_date,n1,n2,n3,n4,n5,n6 FROM il_draws "
+            "WHERE tier=? ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
+            (tier, limit)
+        ).fetchall()
+        lines: List[str] = []
+        for r in rows:
+            date = (r["draw_date"] or "").strip() or "????-??-??"
+            mains = f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}-{r['n6']:02d}"
+            lines.append(f"{date} {mains}")
+        return "\n".join(lines)
+    finally:
+        con.close()
 
-# ----- CSV exports -----
+# ----------------- CSV export (unchanged format with dates) -----------------
+
 def export_csv(game: str, limit: int = 1000) -> str:
-  con = _conn()
-  try:
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    if game == "MM":
-      w.writerow(["draw_date","n1","n2","n3","n4","n5","mb"])
-      for r in con.execute(
-        "SELECT draw_date,n1,n2,n3,n4,n5,bonus FROM mm_draws ORDER BY draw_date DESC, id DESC LIMIT ?",
-        (limit,)
-      ):
-        w.writerow([r["draw_date"], r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r["bonus"]])
-    elif game == "PB":
-      w.writerow(["draw_date","n1","n2","n3","n4","n5","pb"])
-      for r in con.execute(
-        "SELECT draw_date,n1,n2,n3,n4,n5,bonus FROM pb_draws ORDER BY draw_date DESC, id DESC LIMIT ?",
-        (limit,)
-      ):
-        w.writerow([r["draw_date"], r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r["bonus"]])
-    elif game == "IL":
-      w.writerow(["draw_date","tier","n1","n2","n3","n4","n5","n6"])
-      for r in con.execute(
-        "SELECT draw_date,tier,n1,n2,n3,n4,n5,n6 FROM il_draws ORDER BY draw_date DESC, id DESC LIMIT ?",
-        (limit,)
-      ):
-        w.writerow([r["draw_date"], r["tier"], r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r["n6"]])
-    else:
-      raise ValueError("Unknown game")
-    return buf.getvalue()
-  finally:
-    con.close()
+    game = game.upper()
+    con = _conn()
+    try:
+        if game == "MM":
+            rows = con.execute(
+                "SELECT draw_date,n1,n2,n3,n4,n5,bonus,created_at FROM mm_draws "
+                "ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            out = ["draw_date,n1,n2,n3,n4,n5,bonus,created_at"]
+            for r in rows:
+                out.append(f"{r['draw_date'] or ''},{r['n1']},{r['n2']},{r['n3']},{r['n4']},{r['n5']},{r['bonus']},{r['created_at']}")
+            return "\n".join(out)
+
+        if game == "PB":
+            rows = con.execute(
+                "SELECT draw_date,n1,n2,n3,n4,n5,bonus,created_at FROM pb_draws "
+                "ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            out = ["draw_date,n1,n2,n3,n4,n5,bonus,created_at"]
+            for r in rows:
+                out.append(f"{r['draw_date'] or ''},{r['n1']},{r['n2']},{r['n3']},{r['n4']},{r['n5']},{r['bonus']},{r['created_at']}")
+            return "\n".join(out)
+
+        if game == "IL":
+            rows = con.execute(
+                "SELECT draw_date,tier,n1,n2,n3,n4,n5,n6,created_at FROM il_draws "
+                "ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            out = ["draw_date,tier,n1,n2,n3,n4,n5,n6,created_at"]
+            for r in rows:
+                out.append(f"{r['draw_date'] or ''},{r['tier']},{r['n1']},{r['n2']},{r['n3']},{r['n4']},{r['n5']},{r['n6']},{r['created_at']}")
+            return "\n".join(out)
+
+        raise ValueError("game must be MM, PB, or IL")
+    finally:
+        con.close()
+
