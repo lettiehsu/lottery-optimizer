@@ -1,16 +1,14 @@
-/* static/app.js — full UI logic for Phases 1/2/3 with copy buttons */
+/* static/app.js — Phase 1/2/3 UI + history save/blob + copy helpers */
 
-const RUN1_URL = "/run_json";      // Phase 1
-const RUN2_URL = "/run_phase2";    // Phase 2  <-- important
+const RUN1_URL = "/run_json";
+const RUN2_URL = "/run_phase2";
 const CONFIRM_URL = "/confirm_json";
 const RECENT_URL = "/recent";
 
-/* ----------------------- helpers ----------------------- */
 function $(id) { return document.getElementById(id); }
 function el(tag, html) { const e = document.createElement(tag); e.innerHTML = html; return e; }
 function clear(node) { if (node) node.innerHTML = ""; }
 
-/* ---- copy + toast ---- */
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast("Copied!"); }
   catch { window.prompt("Press Ctrl+C to copy:", text); }
@@ -24,12 +22,11 @@ function toast(msg) {
   setTimeout(()=>t.remove(), 1200);
 }
 
-/* ---- state we need for copy buttons ---- */
 let _lastBuyLists = { MM: [], PB: [], IL: [] };
 let _lastP1Path = "";
 let _lastP2Path = "";
 
-/* small renderer for bands cards */
+/* ---------- render helpers ---------- */
 function renderBands(targetId, bands) {
   const host = $(targetId);
   if (!host || !bands) return;
@@ -44,7 +41,7 @@ function renderBands(targetId, bands) {
     const lo = Array.isArray(b) ? b[0] : "–";
     const hi = Array.isArray(b) ? b[1] : "–";
     host.appendChild(el("div",
-      `<div class="card">
+      `<div class="card" style="margin-bottom:8px;">
         <div class="card-title">${it.title}</div>
         <div class="muted">Sum range</div>
         <div class="mono">${lo} – ${hi}</div>
@@ -53,7 +50,6 @@ function renderBands(targetId, bands) {
   }
 }
 
-/* exact rows table filler */
 function fillExact(tbodyId, types, src) {
   const tbody = $(tbodyId);
   clear(tbody);
@@ -65,7 +61,6 @@ function fillExact(tbodyId, types, src) {
   }
 }
 
-/* agg hits table filler */
 function fillAgg(tbodyId, types, src) {
   const tbody = $(tbodyId);
   clear(tbody);
@@ -83,7 +78,6 @@ function fillAgg(tbodyId, types, src) {
   }
 }
 
-/* buy list table filler */
 function fillBuy(tbodyId, rows, hasBonus=false) {
   const tbody = $(tbodyId);
   clear(tbody);
@@ -94,7 +88,6 @@ function fillBuy(tbodyId, rows, hasBonus=false) {
   });
 }
 
-/* list of recent files */
 async function getRecent(intoId) {
   const box = $(intoId);
   const res = await fetch(RECENT_URL);
@@ -103,7 +96,7 @@ async function getRecent(intoId) {
   box.textContent = files.length ? files.join("\n") : "No recent files.";
 }
 
-/* ----------------------- Phase 1 ----------------------- */
+/* ---------- Phase 1 ---------- */
 async function runPhase1() {
   const payload = {
     LATEST_MM: $("LATEST_MM").value.trim(),
@@ -131,7 +124,6 @@ async function runPhase1() {
 
   renderBands("bands", data.bands);
 
-  // exact rows
   const e = data.eval_vs_NJ || {};
   fillExact("mm-exact", ["3","3B","4","4B","5","5B"], e.MM || {});
   fillExact("pb-exact", ["3","3B","4","4B","5","5B"], e.PB || {});
@@ -142,10 +134,10 @@ async function runPhase1() {
 
   _lastP1Path = data.saved_path || "";
   $("p1-saved").textContent = "Saved Phase-1 state: " + (_lastP1Path || "(none)");
-  $("phase1_path").value = _lastP1Path;  // prefill Phase 2 input
+  $("phase1_path").value = _lastP1Path;  // prefill Phase 2
 }
 
-/* ----------------------- Phase 2 ----------------------- */
+/* ---------- Phase 2 ---------- */
 async function runPhase2() {
   const p1path = $("phase1_path").value.trim();
   if (!p1path) { alert("Please paste the saved Phase-1 path first."); return; }
@@ -162,13 +154,11 @@ async function runPhase2() {
 
   renderBands("p2-bands", data.bands);
 
-  // buy lists
   const bl = data.buy_lists || {};
   fillBuy("mm-buy", bl.MM || [], true);
   fillBuy("pb-buy", bl.PB || [], true);
   fillBuy("il-buy", bl.IL || [], false);
 
-  // aggregated hits
   const agg = data.agg_hits || {};
   fillAgg("mm-agg", ["3","3B","4","4B","5","5B"], agg.MM || {});
   fillAgg("pb-agg", ["3","3B","4","4B","5","5B"], agg.PB || {});
@@ -181,10 +171,10 @@ async function runPhase2() {
 
   _lastP2Path = data.saved_path || "";
   $("p2-saved").textContent = "Saved Phase-2 state: " + (_lastP2Path || "(none)");
-  $("phase2_path_confirm").value = _lastP2Path;  // prefill Phase 3 input
+  $("phase2_path_confirm").value = _lastP2Path;  // prefill Phase 3
 }
 
-/* ----------------------- Phase 3 — Confirmation ----------------------- */
+/* ---------- Phase 3 ---------- */
 async function confirmPhase3() {
   const path = $("phase2_path_confirm").value.trim();
   if (!path) { alert("Please paste the saved Phase-2 path."); return; }
@@ -231,7 +221,7 @@ function renderConfirmBoxes(hitObj) {
   ["mm-rows","pb-rows","iljp-rows","ilm1-rows","ilm2-rows"].forEach(fillTable);
 }
 
-/* -------- format for copy buy list -------- */
+/* ---------- Copy helpers ---------- */
 function formatBuyListText(tag, rows, hasBonus=false) {
   const lines = [`${tag} buy list:`];
   (rows || []).forEach((t, i) => {
@@ -242,14 +232,77 @@ function formatBuyListText(tag, rows, hasBonus=false) {
   return lines.join("\n");
 }
 
-/* ----------------------- events ----------------------- */
+/* ---------- History: save current NJ → DB ---------- */
+async function saveNJtoHistory() {
+  const payload = {};
+
+  const mm = $("LATEST_MM").value.trim();
+  const pb = $("LATEST_PB").value.trim();
+  const iljp = $("LATEST_IL_JP").value.trim();
+  const ilm1 = $("LATEST_IL_M1").value.trim();
+  const ilm2 = $("LATEST_IL_M2").value.trim();
+
+  function parsePair(txt) {
+    // Accepts "[a,b,c,d,e], x" (spaces OK)
+    if (!txt) return null;
+    try {
+      const m = txt.split("]");
+      if (m.length < 2) return null;
+      const mains = JSON.parse(m[0] + "]");
+      const bonus = JSON.parse(m[1].replace(",", "").trim());
+      return [mains, bonus];
+    } catch { return null; }
+  }
+  function parseSixOnly(txt) {
+    if (!txt) return null;
+    try {
+      // Allow either [1,2,3,4,5,6] or with spaces
+      const arr = JSON.parse(txt.replace(/'/g,'"'));
+      if (Array.isArray(arr) && arr.length === 6) return [arr, null];
+    } catch {}
+    return null;
+  }
+
+  const pMM = parsePair(mm);     if (pMM) payload.LATEST_MM = pMM;
+  const pPB = parsePair(pb);     if (pPB) payload.LATEST_PB = pPB;
+  const pJP = parseSixOnly(iljp); if (pJP) payload.LATEST_IL_JP = pJP;
+  const pM1 = parseSixOnly(ilm1); if (pM1) payload.LATEST_IL_M1 = pM1;
+  const pM2 = parseSixOnly(ilm2); if (pM2) payload.LATEST_IL_M2 = pM2;
+
+  if (!Object.keys(payload).length) {
+    alert("Nothing to save. Fill at least one LATEST_* box first.");
+    return;
+  }
+
+  const res = await fetch("/hist_add", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok || !data.ok) {
+    alert("Save failed: " + (data.detail || res.status));
+    return;
+  }
+  toast("Saved to history: " + (data.added || []).join(", "));
+}
+
+/* ---------- History: show BLOB ---------- */
+async function showBlob(game) {
+  const res = await fetch("/hist_blob?game=" + encodeURIComponent(game));
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok || !data.ok) { alert("Unable to fetch BLOB for " + game); return; }
+  const box = $("blobView");
+  box.style.display = "block";
+  box.textContent = (data.blob || "(empty)");
+}
+
+/* ---------- events ---------- */
 $("btnRun1")?.addEventListener("click", runPhase1);
 $("btnRun2")?.addEventListener("click", runPhase2);
 $("btnConfirm")?.addEventListener("click", confirmPhase3);
 $("btnRecent")?.addEventListener("click", () => getRecent("recentList"));
-$("btnRecent2")?.addEventListener("click", () => getRecent("recentList"));
 
-// Copy saved paths
 $("btnCopyP1")?.addEventListener("click", () => {
   if (!_lastP1Path) return alert("No saved Phase-1 path yet.");
   copyText(_lastP1Path);
@@ -259,7 +312,6 @@ $("btnCopyP2")?.addEventListener("click", () => {
   copyText(_lastP2Path);
 });
 
-// Copy buy lists (from last Phase-2 result)
 $("copyMM")?.addEventListener("click", () => {
   if (!_lastBuyLists.MM.length) return alert("Run Phase 2 first.");
   copyText(formatBuyListText("MM", _lastBuyLists.MM, true));
@@ -272,3 +324,9 @@ $("copyIL")?.addEventListener("click", () => {
   if (!_lastBuyLists.IL.length) return alert("Run Phase 2 first.");
   copyText(formatBuyListText("IL", _lastBuyLists.IL, false));
 });
+
+/* history buttons */
+$("btnSaveToHist")?.addEventListener("click", saveNJtoHistory);
+$("btnShowMMBlob")?.addEventListener("click", () => showBlob("MM"));
+$("btnShowPBBlob")?.addEventListener("click", () => showBlob("PB"));
+$("btnShowILBlob")?.addEventListener("click", () => showBlob("IL"));
