@@ -30,22 +30,61 @@
 <div class="wrap">
   <h1>Lottery Optimizer</h1>
 
-  <!-- CSV upload (master combined) -->
-  <div class="card">
-    <h2>Bulk import history (CSV)</h2>
-    <div class="row">
-      <div class="col">
-        <input id="upload_csv" type="file" />
-      </div>
-      <div class="col" style="max-width:240px">
-        <label class="tight"><input id="upload_over" type="checkbox" checked /> Overwrite existing data</label>
-      </div>
-      <div class="col" style="max-width:160px">
-        <button id="upload_btn">Import CSV</button>
-      </div>
-    </div>
-    <pre id="upload_result" class="tight" style="white-space:pre-wrap"></pre>
-  </div>
+  <!-- CSV IMPORT (works with app.py /store/import_csv) -->
+<section class="card">
+  <h2>Bulk import history (CSV)</h2>
+
+  <form id="csvForm" enctype="multipart/form-data" onsubmit="return false;">
+    <input type="file" id="csvFile" name="file" accept=".csv" />
+    <label style="margin-left:8px;">
+      <input type="checkbox" name="overwrite" value="1" checked /> Overwrite existing data
+    </label>
+    <button type="button" id="btnImportCsv">Import CSV</button>
+  </form>
+
+  <pre id="csvResult" style="background:#111; color:#8f8; padding:8px; margin-top:8px; white-space:pre-wrap;"></pre>
+</section>
+
+<script>
+  (function () {
+    const btn = document.getElementById('btnImportCsv');
+    const fileInput = document.getElementById('csvFile');
+    const result = document.getElementById('csvResult');
+
+    btn.addEventListener('click', async () => {
+      const f = fileInput.files[0];
+      if (!f) {
+        alert('Choose a CSV file first.');
+        return;
+      }
+      const fd = new FormData();
+      fd.append('file', f); // <<< field name MUST be "file"
+
+      // include overwrite if checked
+      const ow = document.querySelector('#csvForm input[name="overwrite"]').checked;
+      if (ow) fd.append('overwrite', '1');
+
+      result.textContent = 'Uploading…';
+      try {
+        const resp = await fetch('/store/import_csv', {
+          method: 'POST',
+          body: fd
+        });
+
+        const text = await resp.text();
+        // Show raw text if server didn’t return JSON (useful for 404/debug)
+        try {
+          const data = JSON.parse(text);
+          result.textContent = JSON.stringify(data, null, 2);
+        } catch {
+          result.textContent = text;
+        }
+      } catch (err) {
+        result.textContent = 'Network error: ' + (err?.message || err);
+      }
+    });
+  })();
+</script>
 
   <!-- Phase 1 -->
   <div class="card">
