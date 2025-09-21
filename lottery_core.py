@@ -655,6 +655,109 @@ def health() -> dict:
     except Exception as e:
         return {"ok": True, "core_loaded": False, "err": f"{type(e).__name__}: {e}"}
 
+# ===== Phase 3: Confirmation (add this above the COMPATIBILITY APPENDIX) =====
+import json, os
+from typing import Dict, Any, List, Tuple
+
+def _normalize_win(entry):
+    """
+    Accepts either:
+      [[mains...], bonus_or_None]         (the JSON format you paste)
+    Returns: (set_of_mains, bonus_or_None)
+    """
+    if not entry or not isinstance(entry, (list, tuple)) or len(entry) != 2:
+        return set(), None
+    mains, bonus = entry
+    try:
+        mains_set = set(int(x) for x in mains)
+    except Exception:
+        mains_set = set()
+    try:
+        b = None if bonus is None else int(bonus)
+    except Exception:
+        b = None
+    return mains_set, b
+
+def _confirm_hits_for_buylist(buy_rows: List[Dict[str, Any]],
+                              win_mains: set, win_bonus: int | None,
+                              has_bonus: bool) -> Dict[str, List[int]]:
+    """
+    For a given buy list and a winning combo, return dict of positions (1-based):
+      MM/PB -> {"3":[], "3B":[], "4":[], "4B":[], "5":[], "5B":[]}
+      IL    -> {"3":[], "4":[], "5":[], "6":[]}
+    """
+    if has_bonus:
+        out = {"3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []}
+    else:
+        out = {"3": [], "4": [], "5": [], "6": []}
+
+    if not buy_rows or not win_mains:
+        return out
+
+    for idx, t in enumerate(buy_rows, start=1):
+        mains = set(int(x) for x in (t.get("mains") or []))
+        k = len(mains & win_mains)
+        if has_bonus:
+            bonus = t.get("bonus")
+            bonus_ok = (win_bonus is not None and bonus is not None and int(bonus) == int(win_bonus))
+            if k == 3:
+                out["3"].append(idx)
+                if bonus_ok: out["3B"].append(idx)
+            elif k == 4:
+                out["4"].append(idx)
+                if bonus_ok: out["4B"].append(idx)
+            elif k == 5:
+                out["5"].append(idx)
+                if bonus_ok: out["5B"].append(idx)
+        else:
+            # IL (no bonus)
+            if k == 3: out["3"].append(idx)
+            elif k == 4: out["4"].append(idx)
+            elif k == 5: out["5"].append(idx)
+            elif k == 6: out["6"].append(idx)
+    return out
+
+def handle_confirm(saved_phase2_path: str, nwj: Dict[str, Any] | None) -> Dict[str, Any]:
+    """
+    Phase 3. Compare Phase-2 buy lists with the newest winning jackpots (NWJ).
+    Input:
+       saved_phase2_path: path to JSON produced by Phase 2
+       nwj: dict with any subset of:
+            LATEST_MM, LATEST_PB,
+            LATEST_IL_JP, LATEST_IL_M1, LATEST_IL_M2
+            Each value like [[mains...], bonus] (bonus is null for IL)
+    Output:
+       {"ok": True, "confirm_hits": {...}}
+    """
+    try:
+        with open(saved_phase2_path, "r", encoding="utf-8") as f:
+            p2 = json.load(f)
+    except Exception as e:
+        return {"ok": False, "error": type(e).__name__, "detail": str(e)}
+
+    buy_lists = p2.get("buy_lists", {}) or {}
+    mm_buy = buy_lists.get("MM") or []
+    pb_buy = buy_lists.get("PB") or []
+    il_buy = buy_lists.get("IL") or []
+
+    nwj = nwj or {}
+    mm_win = _normalize_win(nwj.get("LATEST_MM"))
+    pb_win = _normalize_win(nwj.get("LATEST_PB"))
+    il_jp_win = _normalize_win(nwj.get("LATEST_IL_JP"))
+    il_m1_win = _normalize_win(nwj.get("LATEST_IL_M1"))
+    il_m2_win = _normalize_win(nwj.get("LATEST_IL_M2"))
+
+    confirm = {
+        "MM": _confirm_hits_for_buylist(mm_buy, mm_win[0], mm_win[1], has_bonus=True) if mm_win[0] else {"3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []},
+        "PB": _confirm_hits_for_buylist(pb_buy, pb_win[0], pb_win[1], has_bonus=True) if pb_win[0] else {"3": [], "3B": [], "4": [], "4B": [], "5": [], "5B": []},
+        "IL": {
+            "JP": _confirm_hits_for_buylist(il_buy, il_jp_win[0], None, has_bonus=False) if il_jp_win[0] else {"3": [], "4": [], "5": [], "6": []},
+            "M1": _confirm_hits_for_buylist(il_buy, il_m1_win[0], None, has_bonus=False) if il_m1_win[0] else {"3": [], "4": [], "5": [], "6": []},
+            "M2": _confirm_hits_for_buylist(il_buy, il_m2_win[0], None, has_bonus=False) if il_m2_win[0] else {"3": [], "4": [], "5": [], "6": []},
+        }
+    }
+    return {"ok": True, "confirm_hits": confirm}
+
 # =========================
 # COMPATIBILITY APPENDIX
 # Ensure the functions that app.py expects are present, forwarding to alternates if needed.
