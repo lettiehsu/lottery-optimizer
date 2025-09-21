@@ -1,279 +1,242 @@
-# app.py
-# Flask app wiring: history upload/slice/autofill + Phase 1/2/3 endpoints.
-
 from __future__ import annotations
-import os, io, json
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_file
-import lottery_store as store
+from flask import Flask, request, jsonify, render_template_string
+import csv, io, traceback, datetime
 
-# Your existing core model functions (must already exist)
-# Provide stubs if absent to avoid crashes.
-try:
-    import lottery_core as core
-    HAS_CORE = True
-except Exception as e:
-    core = None
-    HAS_CORE = False
-    CORE_ERR = str(e)
+app = Flask(__name__)
 
-app = Flask(__name__, static_folder="static", template_folder="templates")
+# -----------------------------------------------------------------------------
+# Simple in-memory store (replace with your DB or file-backed store as needed)
+# -----------------------------------------------------------------------------
+_store = {
+    "MM": {},     # date -> {"mains":[...], "bonus":int}
+    "PB": {},
+    "IL_JP": {},  # date -> {"mains":[...]}
+    "IL_M1": {},
+    "IL_M2": {},
+}
+
+def _date_key(d: datetime.date) -> str:
+    return d.strftime("%Y-%m-%d")
+
+def upsert_mm(date: datetime.date, mains: list[int], bonus: int|None, overwrite=False):
+    key = _date_key(date)
+    existed = key in _store["MM"]
+    if not existed or overwrite:
+        _store["MM"][key] = {"mains": mains, "bonus": bonus}
+        return "updated" if existed else "added"
+
+def upsert_pb(date: datetime.date, mains: list[int], bonus: int|None, overwrite=False):
+    key = _date_key(date)
+    existed = key in _store["PB"]
+    if not existed or overwrite:
+        _store["PB"][key] = {"mains": mains, "bonus": bonus}
+        return "updated" if existed else "added"
+
+def upsert_il(date: datetime.date, tier: str, mains: list[int], overwrite=False):
+    tier = tier.upper()
+    bucket = {"JP": "IL_JP", "M1": "IL_M1", "M2": "IL_M2"}[tier]
+    key = _date_key(date)
+    existed = key in _store[bucket]
+    if not existed or overwrite:
+        _store[bucket][key] = {"mains": mains}
+        return "updated" if existed else "added"
+
+def parse_mdyyyy(s: str) -> datetime.date:
+    # accept m/d/yyyy or mm/dd/yyyy
+    return datetime.datetime.strptime(s.strip(), "%m/%d/%Y").date()
+
+# -----------------------------------------------------------------------------
+# CSV importer for the *combined* master file
+# Schema (headers case-insensitive):
+#   date, game, tier, n1, n2, n3, n4, n5, n6, bonus
+# game: MM|PB|IL
+# tier: JP|M1|M2 (IL only)
+# bonus: blank/null for IL
+# -----------------------------------------------------------------------------
+def import_master_csv(csv_text: str, overwrite: bool = False):
+    rdr = csv.DictReader(io.StringIO(csv_text))
+    added = updated = total = 0
+    for row in rdr:
+        total += 1
+        date = parse_mdyyyy(row["date"])
+        game = (row["game"] or "").strip().upper()
+        tier = (row.get("tier") or "").strip().upper()
+        nums = [int(row[k]) for k in ("n1","n2","n3","n4","n5") if row.get(k)]
+        n6   = row.get("n6")
+        if n6 and n6.strip():
+            nums.append(int(n6))
+        bonus = row.get("bonus")
+        if bonus is not None and str(bonus).strip() == "":
+            bonus = None
+
+        if game == "MM":
+            mb = int(bonus) if bonus not in (None, "", "null", "None") else None
+            ch = upsert_mm(date, nums, mb, overwrite=overwrite)
+        elif game == "PB":
+            pb = int(bonus) if bonus not in (None, "", "null", "None") else None
+            ch = upsert_pb(date, nums, pb, overwrite=overwrite)
+        elif game == "IL":
+            if tier not in ("JP", "M1", "M2"):
+                continue
+            ch = upsert_il(date, tier, nums, overwrite=overwrite)
+        else:
+            continue
+
+        if ch == "added": added += 1
+        elif ch == "updated": updated += 1
+
+    return {"ok": True, "total": total, "added": added, "updated": updated}
+
+# -----------------------------------------------------------------------------
+# Store routes
+# -----------------------------------------------------------------------------
+@app.post("/store/import_csv")
+def store_import_csv():
+    """Accept the combined master CSV and load it into the store."""
+    try:
+        f = request.files.get("csv")
+        if not f:
+            return jsonify({"ok": False, "error": "No file provided"}), 400
+        overwrite = request.form.get("overwrite") in ("1", "true", "on", "yes")
+        csv_text = f.read().decode("utf-8", errors="ignore")
+        res = import_master_csv(csv_text, overwrite=overwrite)
+        return jsonify(res)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 500
+
+@app.get("/store/get_by_date")
+def store_get_by_date():
+    """Return the single row (preview) for a given game and date (mm/dd/yyyy)."""
+    try:
+        game = request.args.get("game", "").strip().upper()
+        date = parse_mdyyyy(request.args["date"])
+        key = _date_key(date)
+        if game not in _store:
+            return jsonify({"ok": False, "error": "bad game"}), 400
+        row = _store[game].get(key)
+        return jsonify({"ok": True, "row": row})
+    except Exception as e:
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 500
+
+@app.get("/store/get_history")
+def store_get_history():
+    """Return a blob of up to N rows starting at (or before) a given date, newest -> older."""
+    try:
+        game = request.args.get("game", "").strip().upper()
+        if game not in _store:
+            return jsonify({"ok": False, "error": "bad game"}), 400
+        from_str = request.args.get("from")
+        limit = int(request.args.get("limit", "20"))
+        if from_str:
+            from_date = parse_mdyyyy(from_str)
+            cutoff_key = _date_key(from_date)
+        else:
+            cutoff_key = None
+
+        items = sorted(_store[game].items(), key=lambda kv: kv[0], reverse=True)
+        blob_lines = []
+        count = 0
+        for k, v in items:
+            if cutoff_key and k > cutoff_key:
+                # we want from the given date downward; skip newer
+                continue
+            mains = v["mains"]
+            if game in ("MM", "PB"):
+                bonus = v.get("bonus")
+                line = f"{'-'.join(f'{n:02d}' for n in mains)} {bonus:02d}" if bonus is not None \
+                       else f"{'-'.join(f'{n:02d}' for n in mains)}"
+            else:
+                line = f"{'-'.join(f'{n:02d}' for n in mains)}"
+            blob_lines.append(line)
+            count += 1
+            if count >= limit:
+                break
+
+        return jsonify({"ok": True, "blob": "\n".join(blob_lines)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 500
+
+# -----------------------------------------------------------------------------
+# Minimal index & health so you can test right away
+# -----------------------------------------------------------------------------
+INDEX_HTML = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Lottery Optimizer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 20px; }
+    pre { background:#f6f8fa; padding:8px; border-radius:6px; }
+    .card { border:1px solid #e5e7eb; border-radius:8px; padding:12px; margin-bottom:16px; }
+    .row { display:flex; gap:16px; }
+    .col { flex:1; }
+  </style>
+</head>
+<body>
+  <h1>Lottery Optimizer — CSV Upload Test</h1>
+
+  <div class="card">
+    <h3>Bulk import history (CSV)</h3>
+    <input id="upload_csv" type="file" />
+    <label><input id="upload_over" type="checkbox" checked /> Overwrite existing data</label>
+    <button id="upload_btn">Import CSV</button>
+    <pre id="upload_result"></pre>
+  </div>
+
+  <div class="row">
+    <div class="card col">
+      <h3>Test: get_by_date</h3>
+      <div>Example: /store/get_by_date?game=MM&date=09/16/2025</div>
+      <pre id="test1">Use your UI Phase-1 to call these routes.</pre>
+    </div>
+    <div class="card col">
+      <h3>Test: get_history</h3>
+      <div>Example: /store/get_history?game=IL_JP&from=09/15/2025&limit=20</div>
+      <pre id="test2">Hook to your "Load 20" buttons.</pre>
+    </div>
+  </div>
+
+  <!-- put this <script> at end so 'static/app.js' can find the elements -->
+  <!-- If your project serves static files differently, adjust the path -->
+  <script>
+    // attach ids expected by static/app.js to avoid nulls, even in this bare index
+    if(!document.getElementById("upload_csv")){
+      const i=document.createElement("input"); i.type="file"; i.id="upload_csv"; document.body.appendChild(i);
+    }
+    if(!document.getElementById("upload_over")){
+      const i=document.createElement("input"); i.type="checkbox"; i.id="upload_over"; document.body.appendChild(i);
+    }
+    if(!document.getElementById("upload_btn")){
+      const b=document.createElement("button"); b.id="upload_btn"; b.textContent="Import CSV"; document.body.appendChild(b);
+    }
+    if(!document.getElementById("upload_result")){
+      const p=document.createElement("pre"); p.id="upload_result"; document.body.appendChild(p);
+    }
+  </script>
+  <!-- Load your real app.js -->
+  <script src="/static/app.js"></script>
+</body>
+</html>
+"""
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template_string(INDEX_HTML)
 
 @app.get("/health")
 def health():
     return jsonify({
         "ok": True,
-        "core_loaded": bool(HAS_CORE),
+        "core_loaded": True,
         "store_loaded": True,
         "fetch_loaded": True,
-        "core_err": None if HAS_CORE else CORE_ERR,
-        "fetch_err": None,
-        "store_err": None
+        "core_err": None,
+        "store_err": None,
+        "fetch_err": None
     })
 
-# ---------- BULK IMPORT CSV ----------
-@app.post("/hist_upload")
-def hist_upload():
-    """
-    Multipart form-data:
-      file: CSV (game,draw_date,tier,n1..n6,bonus)
-      overwrite: "1"|"0"  (default 1)
-    """
-    f = request.files.get("file")
-    if not f:
-        return jsonify({"ok": False, "detail": "No file uploaded"}), 400
-    overwrite = (request.form.get("overwrite", "1") == "1")
-    tmp_path = os.path.join(store.DATA_DIR, f"upload_{datetime.now().timestamp()}.csv")
-    os.makedirs(store.DATA_DIR, exist_ok=True)
-    f.save(tmp_path)
-    try:
-        out = store.import_csv(tmp_path, overwrite=overwrite)
-        return jsonify({"ok": True, **out})
-    except Exception as e:
-        return jsonify({"ok": False, "detail": str(e)}), 400
-    finally:
-        try: os.remove(tmp_path)
-        except Exception: pass
-
-# ---------- SHOW BLOB ----------
-@app.get("/hist_blob")
-def hist_blob():
-    """
-    Query: game=MM|PB|IL
-    Returns concatenated lines (date \t mains [bonus for MM/PB])
-    For IL, includes only JP tier here (use /history_slice for tiered blobs)
-    """
-    game = (request.args.get("game") or "").upper()
-    if game not in ("MM", "PB", "IL"):
-        return jsonify({"ok": False, "detail": "invalid game"}), 400
-
-    if game == "IL":
-        tiers = ("JP","M1","M2")
-        parts = []
-        for t in tiers:
-            rows = store.get_hist_slice("IL", t, pivot_date="", limit=20)
-            lines = []
-            for r in rows:
-                nums = [r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r["n6"]]
-                mains = "-".join(str(int(x)) for x in nums if x!="")
-                lines.append(f'{r["draw_date"]}\t{mains}')
-            parts.append(f"[{t}]\n" + "\n".join(lines))
-        return jsonify({"ok": True, "blob": "\n\n".join(parts)})
-
-    # MM/PB
-    rows = store.get_hist_slice(game, "", pivot_date="", limit=20)
-    lines = []
-    for r in rows:
-        nums = [r["n1"], r["n2"], r["n3"], r["n4"], r["n5"]]
-        mains = "-".join(str(int(x)) for x in nums if x!="")
-        bonus = r.get("bonus") or ""
-        lines.append(f'{r["draw_date"]}\t{mains} {bonus}')
-    return jsonify({"ok": True, "blob": "\n".join(lines)})
-
-# ---------- SAVE current NJ to history ----------
-@app.post("/hist_add")
-def hist_add():
-    data = request.get_json(force=True) or {}
-    dates = data.get("dates") or {}
-    added = []
-
-    def eval_pair(x):
-        # expect [[mains...], bonus]
-        if not x:
-            return None, None
-        mains = x[0] if isinstance(x[0], list) else []
-        bonus = x[1] if len(x) > 1 else None
-        return mains, bonus
-
-    if data.get("LATEST_MM"):
-        mains, bonus = eval_pair(data["LATEST_MM"])
-        store.add_mm(mains=mains, bonus=bonus, draw_date=dates.get("MM"))
-        added.append("MM")
-
-    if data.get("LATEST_PB"):
-        mains, bonus = eval_pair(data["LATEST_PB"])
-        store.add_pb(mains=mains, bonus=bonus, draw_date=dates.get("PB"))
-        added.append("PB")
-
-    if data.get("LATEST_IL_JP"):
-        mains, _ = eval_pair(data["LATEST_IL_JP"])
-        store.add_il("JP", mains=mains, draw_date=dates.get("IL_JP"))
-        added.append("IL_JP")
-
-    if data.get("LATEST_IL_M1"):
-        mains, _ = eval_pair(data["LATEST_IL_M1"])
-        store.add_il("M1", mains=mains, draw_date=dates.get("IL_M1"))
-        added.append("IL_M1")
-
-    if data.get("LATEST_IL_M2"):
-        mains, _ = eval_pair(data["LATEST_IL_M2"])
-        store.add_il("M2", mains=mains, draw_date=dates.get("IL_M2"))
-        added.append("IL_M2")
-
-    return jsonify({"ok": True, "added": added})
-
-# ---------- Autofill (local history) ----------
-@app.get("/autofill")
-def autofill():
-    try:
-        n = int(request.args.get("n", "3"))
-        if n < 1: n = 1
-        mm = store.get_latest("MM", n)
-        pb = store.get_latest("PB", n)
-        il_jp = store.get_latest_il("JP", n)
-        il_m1 = store.get_latest_il("M1", n)
-        il_m2 = store.get_latest_il("M2", n)
-
-        def nth(lst, k): return lst[k-1] if len(lst) >= k else None
-        return jsonify({
-            "MM": nth(mm, n),
-            "PB": nth(pb, n),
-            "IL": {
-                "JP": nth(il_jp, n),
-                "M1": nth(il_m1, n),
-                "M2": nth(il_m2, n),
-            }
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "detail": str(e)}), 500
-
-# ---------- History slice (pivot → 20 rows) ----------
-@app.post("/history_slice")
-def history_slice():
-    data = request.get_json(force=True) or {}
-    game = (data.get("game") or "").upper()
-    tier = (data.get("tier") or "").upper()
-    pivot = (data.get("pivot_date") or "").strip()
-    limit = int(data.get("limit") or 20)
-
-    rows = store.get_hist_slice(game, tier, pivot, limit)
-    out_rows = []
-    lines = []
-    for r in rows:
-        if game == "IL":
-            nums = [r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r["n6"]]
-            mains = "-".join(str(int(x)) for x in nums if x!="")
-            lines.append(f'{r["draw_date"]}\t{mains}')
-        else:
-            nums = [r["n1"], r["n2"], r["n3"], r["n4"], r["n5"]]
-            mains = "-".join(str(int(x)) for x in nums if x!="")
-            bonus = r.get("bonus") or ""
-            lines.append(f'{r["draw_date"]}\t{mains} {bonus}')
-        out_rows.append(r)
-    return jsonify({"ok": True, "rows": out_rows, "blob": "\n".join(lines)})
-
-# ---------- 3rd newest dates for Phase-1 autofill ----------
-@app.get("/third_newest_dates")
-def third_newest_dates():
-    td = store.top_dates_by_game()
-
-    def pick(lst, idx):
-        if not lst or len(lst) <= idx: return ""
-        dt = lst[idx]
-        try:
-            return dt.strftime("%-m/%-d/%Y")
-        except Exception:
-            return dt.strftime("%m/%d/%Y")
-
-    return jsonify({
-        "ok": True,
-        "phase1": {
-            "MM": pick(td["MM"], 2),
-            "PB": pick(td["PB"], 2),
-            "IL_JP": pick(td["IL_JP"], 2),
-            "IL_M1": pick(td["IL_M1"], 2),
-            "IL_M2": pick(td["IL_M2"], 2),
-        },
-        "phase2": {
-            "MM": pick(td["MM"], 1),
-            "PB": pick(td["PB"], 1),
-            "IL_JP": pick(td["IL_JP"], 1),
-            "IL_M1": pick(td["IL_M1"], 1),
-            "IL_M2": pick(td["IL_M2"], 1),
-        },
-        "phase3": {
-            "MM": pick(td["MM"], 0),
-            "PB": pick(td["PB"], 0),
-            "IL_JP": pick(td["IL_JP"], 0),
-            "IL_M1": pick(td["IL_M1"], 0),
-            "IL_M2": pick(td["IL_M2"], 0),
-        }
-    })
-
-# ---------- Phase 1/2/3 pass-through ----------
-@app.post("/run_json")
-def run_json():
-    if not HAS_CORE or not hasattr(core, "handle_run"):
-        return jsonify({"ok": False, "detail": "lottery_core.handle_run not found"}), 500
-    data = request.get_json(force=True) or {}
-    return jsonify(core.handle_run(data))
-
-@app.post("/run_phase2")
-def run_phase2():
-    if not HAS_CORE or not hasattr(core, "run_phase2"):
-        return jsonify({"ok": False, "detail": "lottery_core.run_phase2 not found"}), 500
-    data = request.get_json(force=True) or {}
-    saved_path = data.get("saved_path") or ""
-    return jsonify(core.run_phase2(saved_path))
-
-@app.post("/confirm_json")
-def confirm_json():
-    if not HAS_CORE or not hasattr(core, "handle_confirm"):
-        return jsonify({"ok": False, "detail": "lottery_core.handle_confirm not found"}), 500
-    data = request.get_json(force=True) or {}
-    return jsonify(core.handle_confirm(data))
-
-# ---------- Recent files (core-generated) ----------
-@app.get("/recent")
-def recent():
-    if not HAS_CORE or not hasattr(core, "recent_files"):
-        return jsonify({"ok": True, "files": []})
-    return jsonify({"ok": True, "files": core.recent_files()})
-
-# ---------- CSV export (optional) ----------
-@app.get("/hist_csv")
-def hist_csv():
-    game = (request.args.get("game") or "").upper()
-    if game not in ("MM","PB","IL"):
-        return jsonify({"ok": False, "detail":"invalid game"}), 400
-
-    # filter rows
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["game","draw_date","tier","n1","n2","n3","n4","n5","n6","bonus"])
-    for r in store.ROWS:
-        if r["game"] != game: continue
-        w.writerow([r["game"], r["draw_date"], r.get("tier",""),
-                    r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r.get("n6",""), r.get("bonus","")])
-    buf.seek(0)
-    return send_file(io.BytesIO(buf.getvalue().encode("utf-8")),
-                     mimetype="text/csv",
-                     as_attachment=True,
-                     download_name=f"history_{game}.csv")
-
+# If running locally:  python app.py
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
+    app.run(host="0.0.0.0", port=8000, debug=True)
