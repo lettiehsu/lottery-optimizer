@@ -1,4 +1,4 @@
-# app.py — wiring for Phases 1/2/3 + history + autofill endpoint
+# app.py — wiring for Phases 1/2/3 + history + autofill + CSV import
 from __future__ import annotations
 import os
 from flask import Flask, request, jsonify, render_template
@@ -51,6 +51,7 @@ def index():
         msg.append("POST /hist_add       -> save LATEST_* to DB")
         msg.append("GET  /hist_blob?game=MM|PB|IL")
         msg.append("GET  /hist_csv?game=MM|PB|IL&limit=1000")
+        msg.append("POST /hist_import    -> CSV upload (multipart/form-data)")
         msg.append("GET  /autofill       -> latest jackpots (1st/2nd/3rd)")
         msg.append("GET  /health         -> status")
         return ("\n".join(msg), 200, {"Content-Type": "text/plain; charset=utf-8"})
@@ -206,6 +207,21 @@ def autofill():
         return jsonify(data), (200 if data.get("ok") else 500)
     except Exception as e:
         return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 500
+
+# ================== CSV Import endpoint ==================
+@app.post("/hist_import")
+def hist_import():
+    if not store or store_err:
+        return jsonify({"ok": False, "error": "StoreUnavailable", "detail": store_err or "lottery_store not loaded"}), 500
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "ValueError", "detail": "multipart/form-data with 'file' is required"}), 400
+    f = request.files["file"]
+    try:
+        text = f.read().decode("utf-8", errors="replace")
+        rep = store.import_csv(text)
+        return jsonify({"ok": True, "report": rep})
+    except Exception as e:
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8000"))
