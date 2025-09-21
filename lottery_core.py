@@ -165,10 +165,9 @@ def _vip_set(hot: List[int], overdue: List[int]) -> List[int]:
     return sorted(list(set(hot) & set(overdue)))
 
 def _cap_pool(pool: List[int], limit: int) -> List[int]:
-    # deterministic sub-sample if pool is huge (for speed)
+    # cap pool randomly without resetting global RNG
     if len(pool) <= limit:
         return pool[:]
-    random.seed(1337)
     return random.sample(pool, limit)
 
 # -----------------------------------------------------------------------------
