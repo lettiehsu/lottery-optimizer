@@ -1,10 +1,11 @@
-/* static/app.js — UI logic for Phases 1/2/3 + history + autofill */
+/* static/app.js — UI logic for Phases 1/2/3 + history + autofill + CSV import */
 
 const RUN1_URL = "/run_json";
 const RUN2_URL = "/run_phase2";
 const CONFIRM_URL = "/confirm_json";
 const RECENT_URL = "/recent";
 const AUTOFILL_URL = "/autofill";
+const IMPORT_URL = "/hist_import";
 
 function $(id){return document.getElementById(id);}
 function el(tag, html){const e=document.createElement(tag); e.innerHTML=html; return e;}
@@ -157,7 +158,7 @@ async function doAutofill(which){
     if(j.LATEST_IL_JP) $("LATEST_IL_JP").value = `[${j.LATEST_IL_JP[0].join(", ")}]`;
     if(j.LATEST_IL_M1) $("LATEST_IL_M1").value = `[${j.LATEST_IL_M1[0].join(", ")}]`;
     if(j.LATEST_IL_M2) $("LATEST_IL_M2").value = `[${j.LATEST_IL_M2[0].join(", ")}]`;
-    toast("Phase 1 LATEST_* filled (3rd newest, including IL JP/M1/M2 if available).");
+    toast("Phase 1 LATEST_* filled (3rd newest, including IL if available).");
   }else if(which==="p2"){ // 2nd newest → prefill Phase 1 boxes
     const j=data.phase2_latest||{};
     if(j.LATEST_MM) $("LATEST_MM").value = `[${j.LATEST_MM[0].join(", ")}], ${j.LATEST_MM[1]}`;
@@ -165,7 +166,7 @@ async function doAutofill(which){
     if(j.LATEST_IL_JP) $("LATEST_IL_JP").value = `[${j.LATEST_IL_JP[0].join(", ")}]`;
     if(j.LATEST_IL_M1) $("LATEST_IL_M1").value = `[${j.LATEST_IL_M1[0].join(", ")}]`;
     if(j.LATEST_IL_M2) $("LATEST_IL_M2").value = `[${j.LATEST_IL_M2[0].join(", ")}]`;
-    toast("Phase 1 LATEST_* prefilled with 2nd newest (including IL if available). Run Phase 1 next.");
+    toast("Phase 1 LATEST_* prefilled with 2nd newest (including IL). Run Phase 1 next.");
   }else if(which==="p3"){ // newest → fill NWJ JSON box
     const j=data.phase3_latest||{}; const nwj={};
     if(j.LATEST_MM) nwj.LATEST_MM=j.LATEST_MM;
@@ -176,6 +177,19 @@ async function doAutofill(which){
     $("nwj_json").value = JSON.stringify(nwj);
     toast("Phase 3 NWJ filled (newest).");
   }
+}
+
+/* ===================== CSV IMPORT ===================== */
+async function doImport(){
+  const file = $("csvFile").files[0];
+  if(!file){ alert("Choose a .csv file first."); return; }
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const res = await fetch(IMPORT_URL, { method: "POST", body: fd });
+  let data; try{ data=await res.json(); }catch{ $("importResult").textContent="Server returned non-JSON."; return; }
+  if(!res.ok || !data.ok){ $("importResult").textContent = JSON.stringify(data, null, 2); return; }
+  $("importResult").textContent = JSON.stringify(data.report, null, 2);
+  toast("Import complete");
 }
 
 /* ===================== EVENTS ===================== */
@@ -199,7 +213,8 @@ $("btnShowMMBlob")?.addEventListener("click", ()=>showBlob("MM"));
 $("btnShowPBBlob")?.addEventListener("click", ()=>showBlob("PB"));
 $("btnShowILBlob")?.addEventListener("click", ()=>showBlob("IL"));
 
-// Autofill buttons
 $("btnAutoP1")?.addEventListener("click", ()=>doAutofill("p1"));
 $("btnAutoP2")?.addEventListener("click", ()=>doAutofill("p2"));
 $("btnAutoP3")?.addEventListener("click", ()=>doAutofill("p3"));
+
+$("btnImport")?.addEventListener("click", doImport);
