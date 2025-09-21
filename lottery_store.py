@@ -1,329 +1,242 @@
-# lottery_store.py — SQLite-backed history store with dated BLOB output + CSV import
+# lottery_store.py
+# Simple file-backed store for jackpots + CSV import + history slicing.
+
 from __future__ import annotations
-import os
-import sqlite3
-import csv
-from io import StringIO
+import os, csv, json
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-DB_PATH = os.environ.get("LOTTERY_DB", "lottery.db")
+# Where to persist the master store on disk
+DATA_DIR = os.environ.get("DATA_DIR", ".")
+STORE_PATH = os.path.join(DATA_DIR, "lottery_store.json")
 
-def _conn():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
+# In-memory rows: newest and older across all games/tiers
+# Each row schema:
+#   {
+#     "game": "MM"|"PB"|"IL",
+#     "draw_date": "M/D/YYYY",
+#     "tier": ""|"JP"|"M1"|"M2",
+#     "n1".. "n6": int or "",
+#     "bonus": int or "",
+#   }
+ROWS: List[Dict[str, Any]] = []
 
-def init_db():
-    con = _conn()
+DATE_FMTS = ["%m/%d/%Y", "%Y-%m-%d", "%-m/%-d/%Y"]  # be permissive on load
+
+def _parse_date(s: str) -> Optional[datetime]:
+    if not s:
+        return None
+    for f in DATE_FMTS:
+        try:
+            return datetime.strptime(str(s), f)
+        except Exception:
+            continue
+    return None
+
+def _norm_row(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a row's fields/types."""
+    out = {
+        "game": str(r.get("game", "")).strip().upper(),
+        "draw_date": str(r.get("draw_date", "")).strip(),
+        "tier": str(r.get("tier", "")).strip().upper(),
+        "n1": _to_int_safe(r.get("n1")),
+        "n2": _to_int_safe(r.get("n2")),
+        "n3": _to_int_safe(r.get("n3")),
+        "n4": _to_int_safe(r.get("n4")),
+        "n5": _to_int_safe(r.get("n5")),
+        "n6": _to_int_safe(r.get("n6")),
+        "bonus": _to_int_safe(r.get("bonus")),
+    }
+    # IL always has 6 mains and no bonus
+    if out["game"] == "IL":
+        if out["bonus"] is None:  # keep None / "" as blank
+            out["bonus"] = ""
+    # MM/PB have 5 mains; n6 should be blank
+    if out["game"] in ("MM", "PB"):
+        out["n6"] = ""
+    return out
+
+def _to_int_safe(v) -> Any:
+    if v in (None, "", "null", "None"):
+        return ""
     try:
-        cur = con.cursor()
-        # Mega Millions (5 mains + bonus)
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS mm_draws (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            draw_date TEXT,         -- ISO YYYY-MM-DD if available
-            n1 INTEGER, n2 INTEGER, n3 INTEGER, n4 INTEGER, n5 INTEGER,
-            bonus INTEGER,          -- mega ball
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
+        return int(v)
+    except Exception:
+        try:
+            # handle csv like "07"
+            return int(str(v).strip())
+        except Exception:
+            return ""
 
-        # Powerball (5 mains + bonus)
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS pb_draws (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            draw_date TEXT,
-            n1 INTEGER, n2 INTEGER, n3 INTEGER, n4 INTEGER, n5 INTEGER,
-            bonus INTEGER,          -- powerball
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
+def _key(row: Dict[str, Any]):
+    return (row["game"], row["tier"], row["draw_date"])
 
-        # IL Lotto jackpot/millions (6 mains, tier = 'JP' | 'M1' | 'M2')
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS il_draws (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            draw_date TEXT,
-            tier TEXT,              -- 'JP','M1','M2'
-            n1 INTEGER, n2 INTEGER, n3 INTEGER, n4 INTEGER, n5 INTEGER, n6 INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
+def save():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump(ROWS, f, ensure_ascii=False, indent=2)
 
-        # Uniqueness helpers (avoid duplicates when importing)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_mm_uniq ON mm_draws(draw_date,n1,n2,n3,n4,n5,bonus)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_pb_uniq ON pb_draws(draw_date,n1,n2,n3,n4,n5,bonus)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_il_uniq ON il_draws(draw_date,tier,n1,n2,n3,n4,n5,n6)")
+def load():
+    global ROWS
+    if os.path.exists(STORE_PATH):
+        with open(STORE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            ROWS = [_norm_row(d) for d in data]
+    else:
+        ROWS = []
 
-        con.commit()
-    finally:
-        con.close()
+def clear():
+    global ROWS
+    ROWS = []
+    save()
 
-# ----------------- Insert helpers -----------------
+def import_csv(path: str, overwrite: bool = True) -> Dict[str, Any]:
+    """
+    Import a combined CSV with columns:
+      game,draw_date,tier,n1,n2,n3,n4,n5,n6,bonus
+    If overwrite=True, replaces the store completely. Otherwise, upserts rows.
+    """
+    global ROWS
+    if overwrite:
+        ROWS = []
 
-def add_mm(mains5: List[int], bonus: int, draw_date: str | None = None):
-    if len(mains5) != 5:
-        raise ValueError("MM mains must be length 5")
-    con = _conn()
-    try:
-        con.execute(
-            "INSERT INTO mm_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-            (draw_date, mains5[0], mains5[1], mains5[2], mains5[3], mains5[4], bonus)
-        )
-        con.commit()
-    finally:
-        con.close()
+    seen = { _key(r): i for i, r in enumerate(ROWS) }
+    added, updated = 0, 0
 
-def add_pb(mains5: List[int], bonus: int, draw_date: str | None = None):
-    if len(mains5) != 5:
-        raise ValueError("PB mains must be length 5")
-    con = _conn()
-    try:
-        con.execute(
-            "INSERT INTO pb_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-            (draw_date, mains5[0], mains5[1], mains5[2], mains5[3], mains5[4], bonus)
-        )
-        con.commit()
-    finally:
-        con.close()
+    with open(path, "r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for raw in reader:
+            r = _norm_row(raw)
+            if not r["game"] or not r["draw_date"]:
+                continue
+            k = _key(r)
+            if k in seen:
+                ROWS[seen[k]] = r
+                updated += 1
+            else:
+                seen[k] = len(ROWS)
+                ROWS.append(r)
+                added += 1
 
-def add_il(mains6: List[int], tier: str, draw_date: str | None = None):
-    if len(mains6) != 6:
-        raise ValueError("IL mains must be length 6")
-    if tier not in ("JP", "M1", "M2"):
-        raise ValueError("tier must be 'JP','M1','M2'")
-    con = _conn()
-    try:
-        con.execute(
-            "INSERT INTO il_draws(draw_date,tier,n1,n2,n3,n4,n5,n6) VALUES(?,?,?,?,?,?,?,?)",
-            (draw_date, tier, mains6[0], mains6[1], mains6[2], mains6[3], mains6[4], mains6[5])
-        )
-        con.commit()
-    finally:
-        con.close()
+    # keep rows sorted by date desc within (game,tier), but global order doesn't matter
+    ROWS.sort(key=lambda x: (_parse_date(x["draw_date"]) or datetime.min), reverse=True)
+    save()
+    return {"ok": True, "added": added, "updated": updated, "total": len(ROWS)}
 
-# ----------------- Dated BLOB builders -----------------
+# ---- Add single entries (used by "Save current NJ → History") ----
 
-def mm_blob(limit: int = 20) -> str:
-    con = _conn()
-    try:
-        rows = con.execute(
-            "SELECT draw_date,n1,n2,n3,n4,n5,bonus "
-            "FROM mm_draws ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
-        lines: List[str] = []
-        for r in rows:
-            date = (r["draw_date"] or "").strip() or "????-??-??"
-            mains = f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}"
-            lines.append(f"{date} {mains} {int(r['bonus']):02d}")
-        return "\n".join(lines)
-    finally:
-        con.close()
+def add_mm(mains: list[int], bonus: int, draw_date: Optional[str] = None):
+    _add_single("MM", "", mains, bonus, draw_date)
 
-def pb_blob(limit: int = 20) -> str:
-    con = _conn()
-    try:
-        rows = con.execute(
-            "SELECT draw_date,n1,n2,n3,n4,n5,bonus "
-            "FROM pb_draws ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
-        lines: List[str] = []
-        for r in rows:
-            date = (r["draw_date"] or "").strip() or "????-??-??"
-            mains = f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}"
-            lines.append(f"{date} {mains} {int(r['bonus']):02d}")
-        return "\n".join(lines)
-    finally:
-        con.close()
+def add_pb(mains: list[int], bonus: int, draw_date: Optional[str] = None):
+    _add_single("PB", "", mains, bonus, draw_date)
 
-def il_blob(limit: int = 20, tier: str = "JP") -> str:
-    con = _conn()
-    try:
-        rows = con.execute(
-            "SELECT draw_date,n1,n2,n3,n4,n5,n6 FROM il_draws "
-            "WHERE tier=? ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
-            (tier, limit)
-        ).fetchall()
-        lines: List[str] = []
-        for r in rows:
-            date = (r["draw_date"] or "").strip() or "????-??-??"
-            mains = f"{r['n1']:02d}-{r['n2']:02d}-{r['n3']:02d}-{r['n4']:02d}-{r['n5']:02d}-{r['n6']:02d}"
-            lines.append(f"{date} {mains}")
-        return "\n".join(lines)
-    finally:
-        con.close()
+def add_il(tier: str, mains: list[int], draw_date: Optional[str] = None):
+    tier = (tier or "JP").upper()
+    _add_single("IL", tier, mains, "", draw_date)
 
-# ----------------- CSV export -----------------
+def _add_single(game: str, tier: str, mains: list[int], bonus: Any, draw_date: Optional[str]):
+    global ROWS
+    if not draw_date:
+        # default to today M/D/YYYY
+        draw_date = datetime.now().strftime("%-m/%-d/%Y")
+        try:
+            # Windows compatibility
+            draw_date = datetime.now().strftime("%m/%d/%Y")
+        except Exception:
+            pass
+    r = {
+        "game": game,
+        "draw_date": draw_date,
+        "tier": tier,
+        "n1": _to_int_safe(mains[0] if len(mains)>0 else ""),
+        "n2": _to_int_safe(mains[1] if len(mains)>1 else ""),
+        "n3": _to_int_safe(mains[2] if len(mains)>2 else ""),
+        "n4": _to_int_safe(mains[3] if len(mains)>3 else ""),
+        "n5": _to_int_safe(mains[4] if len(mains)>4 else ""),
+        "n6": _to_int_safe(mains[5] if len(mains)>5 else ""),
+        "bonus": _to_int_safe(bonus),
+    }
+    r = _norm_row(r)
+    k = _key(r)
+    # upsert
+    idx = next((i for i,x in enumerate(ROWS) if _key(x) == k), None)
+    if idx is None:
+        ROWS.append(r)
+    else:
+        ROWS[idx] = r
+    ROWS.sort(key=lambda x: (_parse_date(x["draw_date"]) or datetime.min), reverse=True)
+    save()
 
-def export_csv(game: str, limit: int = 1000) -> str:
-    game = game.upper()
-    con = _conn()
-    try:
-        if game == "MM":
-            rows = con.execute(
-                "SELECT draw_date,n1,n2,n3,n4,n5,bonus,created_at FROM mm_draws "
-                "ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
-            out = ["draw_date,n1,n2,n3,n4,n5,bonus,created_at"]
-            for r in rows:
-                out.append(f"{r['draw_date'] or ''},{r['n1']},{r['n2']},{r['n3']},{r['n4']},{r['n5']},{r['bonus']},{r['created_at']}")
-            return "\n".join(out)
+# ---- Latest pickers for autofill ----
 
-        if game == "PB":
-            rows = con.execute(
-                "SELECT draw_date,n1,n2,n3,n4,n5,bonus,created_at FROM pb_draws "
-                "ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
-            out = ["draw_date,n1,n2,n3,n4,n5,bonus,created_at"]
-            for r in rows:
-                out.append(f"{r['draw_date'] or ''},{r['n1']},{r['n2']},{r['n3']},{r['n4']},{r['n5']},{r['bonus']},{r['created_at']}")
-            return "\n".join(out)
+def get_latest(game: str, n: int) -> List[list]:
+    """
+    For MM/PB: returns newest-first list of [[mains], bonus]
+    """
+    items = [r for r in ROWS if r["game"] == game and (r.get("tier") or "") == ""]
+    items.sort(key=lambda x: (_parse_date(x["draw_date"]) or datetime.min), reverse=True)
+    out = []
+    for r in items[:n]:
+        mains = [r["n1"], r["n2"], r["n3"], r["n4"], r["n5"]]
+        out.append([mains, r["bonus"]])
+    return out
 
-        if game == "IL":
-            rows = con.execute(
-                "SELECT draw_date,tier,n1,n2,n3,n4,n5,n6,created_at FROM il_draws "
-                "ORDER BY COALESCE(draw_date,'9999-99-99') DESC, id DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
-            out = ["draw_date,tier,n1,n2,n3,n4,n5,n6,created_at"]
-            for r in rows:
-                out.append(f"{r['draw_date'] or ''},{r['tier']},{r['n1']},{r['n2']},{r['n3']},{r['n4']},{r['n5']},{r['n6']},{r['created_at']}")
-            return "\n".join(out)
+def get_latest_il(tier: str, n: int) -> List[list]:
+    """
+    For IL tiers: returns newest-first list of [[mains], null]
+    """
+    tier = (tier or "JP").upper()
+    items = [r for r in ROWS if r["game"] == "IL" and (r.get("tier") or "") == tier]
+    items.sort(key=lambda x: (_parse_date(x["draw_date"]) or datetime.min), reverse=True)
+    out = []
+    for r in items[:n]:
+        mains = [r["n1"], r["n2"], r["n3"], r["n4"], r["n5"], r["n6"]]
+        out.append([mains, None])
+    return out
 
-        raise ValueError("game must be MM, PB, or IL")
-    finally:
-        con.close()
+# ---- History slice (pivot date → 20 rows older) ----
 
-# ----------------- CSV import (bulk) -----------------
-"""
-Flexible CSV schema supported:
+def get_hist_slice(game: str, tier: str, pivot_date: str, limit: int = 20) -> List[Dict[str, Any]]:
+    if game == "IL":
+        tier = (tier or "JP").upper()
+    else:
+        tier = ""
+    items = [r for r in ROWS if r["game"] == game and (r.get("tier") or "") == tier]
+    for r in items:
+        r["_dt"] = _parse_date(r.get("draw_date", ""))
+    items = [r for r in items if r["_dt"] is not None]
+    items.sort(key=lambda r: r["_dt"], reverse=True)
 
-A) One combined file with a 'game' column:
-   game,draw_date,tier,n1,n2,n3,n4,n5,n6,bonus
-   MM,2024-08-23,,10,14,34,40,43,,5
-   PB,2024-08-24,,14,15,32,42,49,,1
-   IL,2024-08-24,JP,01,04,05,10,18,49,
-   IL,2024-08-24,M1,06,08,10,18,26,27,
-   IL,2024-08-24,M2,02,18,21,27,43,50,
+    pivot_dt = _parse_date(pivot_date) if pivot_date else (items[0]["_dt"] if items else None)
+    if not pivot_dt:
+        return []
+    start_idx = next((i for i, r in enumerate(items) if r["_dt"] <= pivot_dt), None)
+    if start_idx is None:
+        return []
+    return items[start_idx:start_idx + limit]
 
-B) Per-game files (no 'game' column):
-   # Mega Millions (exact headers, bonus required):
-   draw_date,n1,n2,n3,n4,n5,bonus
+# ---- Date lists for "3rd newest" buttons ----
 
-   # Powerball (exact headers, bonus required):
-   draw_date,n1,n2,n3,n4,n5,bonus
+def top_dates_by_game():
+    out = {"MM": [], "PB": [], "IL_JP": [], "IL_M1": [], "IL_M2": []}
+    for r in ROWS:
+        dt = _parse_date(r.get("draw_date",""))
+        if not dt:
+            continue
+        if r["game"] == "MM":
+            out["MM"].append(dt)
+        elif r["game"] == "PB":
+            out["PB"].append(dt)
+        elif r["game"] == "IL":
+            tier = (r.get("tier") or "")
+            if tier == "JP": out["IL_JP"].append(dt)
+            if tier == "M1": out["IL_M1"].append(dt)
+            if tier == "M2": out["IL_M2"].append(dt)
+    for k in out:
+        # unique + sorted desc
+        out[k] = sorted(list(set(out[k])), reverse=True)
+    return out
 
-   # Illinois Lotto (tier required, bonus ignored):
-   draw_date,tier,n1,n2,n3,n4,n5,n6
-"""
-def import_csv(csv_text: str) -> Dict[str, Any]:
-    reader = csv.DictReader(StringIO(csv_text))
-    headers = [h.strip().lower() for h in (reader.fieldnames or [])]
-
-    has_game = "game" in headers
-    has_tier = "tier" in headers
-    required_any = {"draw_date","n1","n2","n3","n4","n5"}
-    if not required_any.issubset(headers):
-        raise ValueError(f"CSV must include at least: {sorted(required_any)}")
-
-    report = {"inserted": {"MM":0,"PB":0,"IL_JP":0,"IL_M1":0,"IL_M2":0}, "skipped": 0, "errors": 0, "rows": 0}
-    con = _conn()
-    try:
-        cur = con.cursor()
-        for row in reader:
-            report["rows"] += 1
-            try:
-                game = (row.get("game") or "").strip().upper() if has_game else ""
-                draw_date = (row.get("draw_date") or "").strip() or None
-                tier = (row.get("tier") or "").strip().upper() if has_tier else ""
-
-                n1 = int(row.get("n1") or 0); n2 = int(row.get("n2") or 0)
-                n3 = int(row.get("n3") or 0); n4 = int(row.get("n4") or 0)
-                n5 = int(row.get("n5") or 0)
-                n6_val = row.get("n6"); n6 = int(n6_val) if n6_val not in (None, "") else None
-                bonus_val = row.get("bonus"); bonus = int(bonus_val) if bonus_val not in (None, "") else None
-
-                if has_game:
-                    if game == "MM":
-                        if bonus is None: raise ValueError("MM row missing bonus")
-                        cur.execute("SELECT 1 FROM mm_draws WHERE draw_date=? AND n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND bonus=? LIMIT 1",
-                                    (draw_date,n1,n2,n3,n4,n5,bonus))
-                        if cur.fetchone(): 
-                            report["skipped"] += 1; 
-                        else:
-                            cur.execute("INSERT INTO mm_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-                                        (draw_date,n1,n2,n3,n4,n5,bonus))
-                            report["inserted"]["MM"] += 1
-
-                    elif game == "PB":
-                        if bonus is None: raise ValueError("PB row missing bonus")
-                        cur.execute("SELECT 1 FROM pb_draws WHERE draw_date=? AND n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND bonus=? LIMIT 1",
-                                    (draw_date,n1,n2,n3,n4,n5,bonus))
-                        if cur.fetchone():
-                            report["skipped"] += 1
-                        else:
-                            cur.execute("INSERT INTO pb_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-                                        (draw_date,n1,n2,n3,n4,n5,bonus))
-                            report["inserted"]["PB"] += 1
-
-                    elif game == "IL":
-                        if not tier or tier not in ("JP","M1","M2"):
-                            raise ValueError("IL row requires tier JP/M1/M2")
-                        if n6 is None: raise ValueError("IL row missing n6")
-                        cur.execute("SELECT 1 FROM il_draws WHERE draw_date=? AND tier=? AND n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND n6=? LIMIT 1",
-                                    (draw_date,tier,n1,n2,n3,n4,n5,n6))
-                        if cur.fetchone():
-                            report["skipped"] += 1
-                        else:
-                            cur.execute("INSERT INTO il_draws(draw_date,tier,n1,n2,n3,n4,n5,n6) VALUES(?,?,?,?,?,?,?,?)",
-                                        (draw_date,tier,n1,n2,n3,n4,n5,n6))
-                            report["inserted"][f"IL_{tier}"] += 1
-                    else:
-                        raise ValueError("Unknown game (expect MM, PB, or IL)")
-
-                else:
-                    # Per-game file (no 'game' column). Decide by presence of 'tier' and 'n6'/'bonus'
-                    if "bonus" in headers and (n6 is None):
-                        # Treat as MM or PB; let caller decide outside? We try both; no harm in duplicates due to unique-check
-                        if bonus is None: raise ValueError("MM/PB row missing bonus")
-                        # Try MM insert
-                        cur.execute("SELECT 1 FROM mm_draws WHERE draw_date=? AND n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND bonus=? LIMIT 1",
-                                    (draw_date,n1,n2,n3,n4,n5,bonus))
-                        if not cur.fetchone():
-                            cur.execute("INSERT INTO mm_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-                                        (draw_date,n1,n2,n3,n4,n5,bonus))
-                            report["inserted"]["MM"] += 1
-                        else:
-                            report["skipped"] += 1
-
-                        # Try PB insert (if truly PB this will add; otherwise it will skip since duplicate with same combo is unlikely)
-                        cur.execute("SELECT 1 FROM pb_draws WHERE draw_date=? AND n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND bonus=? LIMIT 1",
-                                    (draw_date,n1,n2,n3,n4,n5,bonus))
-                        if not cur.fetchone():
-                            cur.execute("INSERT INTO pb_draws(draw_date,n1,n2,n3,n4,n5,bonus) VALUES(?,?,?,?,?,?,?)",
-                                        (draw_date,n1,n2,n3,n4,n5,bonus))
-                            report["inserted"]["PB"] += 1
-                        else:
-                            report["skipped"] += 1
-
-                    elif "tier" in headers and n6 is not None:
-                        if not tier or tier not in ("JP","M1","M2"):
-                            raise ValueError("IL row requires tier JP/M1/M2")
-                        cur.execute("SELECT 1 FROM il_draws WHERE draw_date=? AND tier=? AND n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND n6=? LIMIT 1",
-                                    (draw_date,tier,n1,n2,n3,n4,n5,n6))
-                        if cur.fetchone():
-                            report["skipped"] += 1
-                        else:
-                            cur.execute("INSERT INTO il_draws(draw_date,tier,n1,n2,n3,n4,n5,n6) VALUES(?,?,?,?,?,?,?,?)",
-                                        (draw_date,tier,n1,n2,n3,n4,n5,n6))
-                            report["inserted"][f"IL_{tier}"] += 1
-                    else:
-                        raise ValueError("Cannot infer game for per-game CSV (check headers)")
-
-            except Exception:
-                report["errors"] += 1
-        con.commit()
-    finally:
-        con.close()
-    return report
+# load at import
+load()
