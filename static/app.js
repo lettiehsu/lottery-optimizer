@@ -1,15 +1,10 @@
-// static/app.js v6 — CSV import, history slicing, Phase 1/2/3, Autofill.
+// static/app.js v8 — layout-only update per your requests.
+// - No Phase-1/3 autofill buttons.
+// - Date boxes are plain text "M/D/YYYY".
+// - On load, we prefill the pivot boxes with 3rd-newest dates so that "Load 20" puts that 3rd newest line first.
 
 (function () {
   const $ = (id) => document.getElementById(id);
-  const dbg = () => $("autofill_debug");
-
-  function log(...a) {
-    console.log("[ui]", ...a);
-    if (dbg()) {
-      dbg().textContent += a.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(" ") + "\n";
-    }
-  }
 
   async function postJSON(url, payload) {
     const res = await fetch(url, {
@@ -46,70 +41,47 @@
     return await postJSON("/history_slice", { game, tier, pivot_date: pivot, limit });
   }
 
-  async function load20_MM(){ const p = $("mmPivot").value.trim(); const r = await historySlice("MM","",p,20); if(r.ok) $("histMM").value = r.blob || ""; }
-  async function load20_PB(){ const p = $("pbPivot").value.trim(); const r = await historySlice("PB","",p,20); if(r.ok) $("histPB").value = r.blob || ""; }
-  async function load20_IL(tier){ const id = tier==="JP"?"ilJpPivot":tier==="M1"?"ilM1Pivot":"ilM2Pivot"; const p=$(id).value.trim(); const r=await historySlice("IL",tier,p,20); if(r.ok) $(tier==="JP"?"histIL_JP":tier==="M1"?"histIL_M1":"histIL_M2").value = r.blob || ""; }
-
-  $("mmLoad20")?.addEventListener("click", load20_MM);
-  $("pbLoad20")?.addEventListener("click", load20_PB);
-  $("ilJpLoad20")?.addEventListener("click", ()=>load20_IL("JP"));
-  $("ilM1Load20")?.addEventListener("click", ()=>load20_IL("M1"));
-  $("ilM2Load20")?.addEventListener("click", ()=>load20_IL("M2"));
-
-  // -------- Autofill Phase 1/3 (from local history) ----------
-  async function tryJSON(url){ const r=await fetch(url,{cache:"no-store"}); const j=await r.json(); log("GET",url,j); return j; }
-
-  async function autofillPhase1(){
-    try{
-      if (dbg()) dbg().textContent = "(starting Phase 1 autofill…)\n";
-      // Set pivots to 3rd newest for each
-      const dates = await tryJSON("/third_newest_dates");
-      const p = dates?.phase1 || {};
-      $("mmPivot").value = p.MM || "";
-      $("pbPivot").value = p.PB || "";
-      $("ilJpPivot").value = p.IL_JP || "";
-      $("ilM1Pivot").value = p.IL_M1 || "";
-      $("ilM2Pivot").value = p.IL_M2 || "";
-      await load20_MM(); await load20_PB(); await load20_IL("JP"); await load20_IL("M1"); await load20_IL("M2");
-
-      // Fill NJ boxes with 3rd newest actual numbers if you like:
-      const af = await tryJSON("/autofill?n=3");
-      const fmtPair = (pair) => pair ? `[${JSON.stringify(pair[0])}, ${pair[1]===null?"null":String(pair[1])}]` : "";
-      const il = af?.IL || {};
-      $("mm_latest").value = fmtPair(af?.MM||null);
-      $("pb_latest").value = fmtPair(af?.PB||null);
-      $("il_jp_latest").value = fmtPair(il?.JP||null);
-      $("il_m1_latest").value = fmtPair(il?.M1||null);
-      $("il_m2_latest").value = fmtPair(il?.M2||null);
-    }catch(e){ alert("Autofill Phase 1 failed: " + e.message); }
+  async function load20_MM(){
+    const p = $("mmPivot").value.trim();
+    if(!p) return alert("Enter MM pivot date (M/D/YYYY)");
+    const r = await historySlice("MM","",p,20);
+    if(r.ok) $("histMM").value = r.blob || "";
+  }
+  async function load20_PB(){
+    const p = $("pbPivot").value.trim();
+    if(!p) return alert("Enter PB pivot date (M/D/YYYY)");
+    const r = await historySlice("PB","",p,20);
+    if(r.ok) $("histPB").value = r.blob || "";
+  }
+  async function load20_IL(tier){
+    const id = tier==="JP"?"ilJpPivot":tier==="M1"?"ilM1Pivot":"ilM2Pivot";
+    const outId = tier==="JP"?"histIL_JP":tier==="M1"?"histIL_M1":"histIL_M2";
+    const p = $(id).value.trim();
+    if(!p) return alert(`Enter IL ${tier} pivot date (M/D/YYYY)`);
+    const r = await historySlice("IL",tier,p,20);
+    if(r.ok) $(outId).value = r.blob || "";
   }
 
-  async function autofillPhase3(){
+  $("mmRetrieve")?.addEventListener("click", load20_MM);
+  $("pbRetrieve")?.addEventListener("click", load20_PB);
+  $("ilJpRetrieve")?.addEventListener("click", ()=>load20_IL("JP"));
+  $("ilM1Retrieve")?.addEventListener("click", ()=>load20_IL("M1"));
+  $("ilM2Retrieve")?.addEventListener("click", ()=>load20_IL("M2"));
+
+  // Prefill pivot dates with 3rd newest on load (no buttons shown)
+  (async function prefillPivots(){
     try{
-      if (dbg()) dbg().textContent = "(starting Phase 3 autofill…)\n";
-      const dates = await tryJSON("/third_newest_dates");
-      // Newest
-      const nwj = { "LATEST_MM":null, "LATEST_PB":null, "LATEST_IL_JP":null, "LATEST_IL_M1":null, "LATEST_IL_M2":null };
-      const af = await tryJSON("/autofill?n=1");
-      nwj.LATEST_MM   = af?.MM || null;
-      nwj.LATEST_PB   = af?.PB || null;
-      nwj.LATEST_IL_JP= af?.IL?.JP || null;
-      nwj.LATEST_IL_M1= af?.IL?.M1 || null;
-      nwj.LATEST_IL_M2= af?.IL?.M2 || null;
-      $("nwj_json").value = JSON.stringify(nwj);
-    }catch(e){ alert("Autofill Phase 3 failed: " + e.message); }
-  }
-
-  window.autofillPhase1 = autofillPhase1;
-  window.autofillPhase3 = autofillPhase3;
-
-  $("btn_autofill_p1")?.addEventListener("click", autofillPhase1);
-  $("btn_autofill_p3")?.addEventListener("click", autofillPhase3);
-  $("mmAuto3rd")?.addEventListener("click", autofillPhase1);
-  $("pbAuto3rd")?.addEventListener("click", autofillPhase1);
-  $("ilJpAuto3rd")?.addEventListener("click", autofillPhase1);
-  $("ilM1Auto3rd")?.addEventListener("click", autofillPhase1);
-  $("ilM2Auto3rd")?.addEventListener("click", autofillPhase1);
+      const j = await fetch("/third_newest_dates", {cache:"no-store"}).then(r=>r.json());
+      const p = j?.phase1 || {};
+      if (p.MM)   $("mmPivot").value  = p.MM;
+      if (p.PB)   $("pbPivot").value  = p.PB;
+      if (p.IL_JP) $("ilJpPivot").value = p.IL_JP;
+      if (p.IL_M1) $("ilM1Pivot").value = p.IL_M1;
+      if (p.IL_M2) $("ilM2Pivot").value = p.IL_M2;
+    }catch(e){
+      console.warn("prefill pivots failed", e);
+    }
+  })();
 
   // -------- Save current NJ → History ----------
   $("btn_save_nj").addEventListener("click", async ()=>{
@@ -137,8 +109,8 @@
   $("btn_run_p1").addEventListener("click", async ()=>{
     try{
       const body = {
-        LATEST_MM: eval($("mm_latest").value||"null"),
-        LATEST_PB: eval($("pb_latest").value||"null"),
+        LATEST_MM:    eval($("mm_latest").value||"null"),
+        LATEST_PB:    eval($("pb_latest").value||"null"),
         LATEST_IL_JP: eval($("il_jp_latest").value||"null"),
         LATEST_IL_M1: eval($("il_m1_latest").value||"null"),
         LATEST_IL_M2: eval($("il_m2_latest").value||"null"),
@@ -204,8 +176,18 @@
   $("btn_run_p3").addEventListener("click", async ()=>{
     try{
       const p2 = $("p3_input_path").value.trim();
-      const nwj = JSON.parse($("nwj_json").value || "{}");
-      const out = await postJSON("/confirm_json", { saved_path: p2, NWJ: nwj });
+
+      // Build NWJ JSON from Phase-3 five boxes
+      const toPair = (txt) => (txt && txt.trim()) ? eval(txt.trim()) : null;
+      const NWJ = {
+        LATEST_MM   : toPair($("mm_latest_p3").value),
+        LATEST_PB   : toPair($("pb_latest_p3").value),
+        LATEST_IL_JP: toPair($("il_jp_latest_p3").value),
+        LATEST_IL_M1: toPair($("il_m1_latest_p3").value),
+        LATEST_IL_M2: toPair($("il_m2_latest_p3").value)
+      };
+
+      const out = await postJSON("/confirm_json", { saved_path: p2, NWJ });
       const fmtHits=(obj)=>Object.entries(obj||{}).map(([k,v])=>`${k}\t${(v||[]).join(", ")||"—"}`).join("\n") || "—";
       $("mm_c_hits").textContent = fmtHits(out.MM||{});
       $("pb_c_hits").textContent = fmtHits(out.PB||{});
