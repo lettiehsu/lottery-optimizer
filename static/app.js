@@ -140,30 +140,31 @@ async function runPhase1() {
   cards.append(renderHitPositions("IL Million 2 (6) vs NJ", il.M2, false));
   out.append(cards);
 
-  // 50-row detailed tables
   if (data.batches) {
-    const B = data.batches;
-    const wrap = el("div","cards");
-    if (Array.isArray(B.MM)) wrap.append(renderBatchTableMM("MM — 50-row batch", B.MM));
-    if (Array.isArray(B.PB)) wrap.append(renderBatchTableMM("PB — 50-row batch", B.PB));
-    if (B.IL) {
-      wrap.append(renderBatchTableIL("IL JP — 50-row batch", B.IL.JP || []));
-      wrap.append(renderBatchTableIL("IL M1 — 50-row batch", B.IL.M1 || []));
-      wrap.append(renderBatchTableIL("IL M2 — 50-row batch", B.IL.M2 || []));
-    }
-    out.append(wrap);
+  const B = data.batches;
 
-    // Exact hit rows per category
-    const wrap2 = el("div","cards");
-    if (Array.isArray(B.MM)) wrap2.append(renderExactHits("MM — exact hit rows", B.MM, ["3","3B","4","4B","5","5B"], true));
-    if (Array.isArray(B.PB)) wrap2.append(renderExactHits("PB — exact hit rows", B.PB, ["3","3B","4","4B","5","5B"], true));
-    if (B.IL) {
-      wrap2.append(renderExactHits("IL JP — exact hit rows", B.IL.JP || [], ["3","4","5","6"], false));
-      wrap2.append(renderExactHits("IL M1 — exact hit rows", B.IL.M1 || [], ["3","4","5","6"], false));
-      wrap2.append(renderExactHits("IL M2 — exact hit rows", B.IL.M2 || [], ["3","4","5","6"], false));
-    }
-    out.append(wrap2);
+  // Exact hit rows per category — show these first
+  const hitCards = el("div","cards");
+  if (Array.isArray(B.MM)) hitCards.append(renderExactHits("MM — exact hit rows", B.MM, ["3","3B","4","4B","5","5B"], true));
+  if (Array.isArray(B.PB)) hitCards.append(renderExactHits("PB — exact hit rows", B.PB, ["3","3B","4","4B","5","5B"], true));
+  if (B.IL) {
+    hitCards.append(renderExactHits("IL JP — exact hit rows", B.IL.JP || [], ["3","4","5","6"], false));
+    hitCards.append(renderExactHits("IL M1 — exact hit rows", B.IL.M1 || [], ["3","4","5","6"], false));
+    hitCards.append(renderExactHits("IL M2 — exact hit rows", B.IL.M2 || [], ["3","4","5","6"], false));
   }
+  out.append(hitCards);
+
+  // Then the 50-row detailed tables
+  const tables = el("div","cards");
+  if (Array.isArray(B.MM)) tables.append(renderBatchTableMM("MM — 50-row batch", B.MM));
+  if (Array.isArray(B.PB)) tables.append(renderBatchTableMM("PB — 50-row batch", B.PB));
+  if (B.IL) {
+    tables.append(renderBatchTableIL("IL JP — 50-row batch", B.IL.JP || []));
+    tables.append(renderBatchTableIL("IL M1 — 50-row batch", B.IL.M1 || []));
+    tables.append(renderBatchTableIL("IL M2 — 50-row batch", B.IL.M2 || []));
+  }
+  out.append(tables);
+}
 
   if (data.saved_path) {
     const p = el("div","okline", `Saved Phase-1 state: <span class="mono">${data.saved_path}</span>`);
