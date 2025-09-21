@@ -1,15 +1,33 @@
-/* static/app.js — UI wiring for Phase 1/2/3 */
+/* static/app.js — full UI logic for Phases 1/2/3 with copy buttons */
 
 const RUN1_URL = "/run_json";      // Phase 1
-const RUN2_URL = "/run_phase2";    // Phase 2 (change to your actual Phase-2 endpoint if different)
+const RUN2_URL = "/run_phase2";    // Phase 2 (change if your backend uses a different path)
 const CONFIRM_URL = "/confirm_json";
 const RECENT_URL = "/recent";
 
 /* ----------------------- helpers ----------------------- */
 function $(id) { return document.getElementById(id); }
-function fmtList(arr) { return Array.isArray(arr) ? arr.join(", ") : "—"; }
 function el(tag, html) { const e = document.createElement(tag); e.innerHTML = html; return e; }
 function clear(node) { if (node) node.innerHTML = ""; }
+
+/* ---- copy + toast ---- */
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("Copied!"); }
+  catch { window.prompt("Press Ctrl+C to copy:", text); }
+}
+function toast(msg) {
+  const t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = "position:fixed;bottom:16px;left:50%;transform:translateX(-50%);"+
+    "background:#111;color:#fff;padding:8px 12px;border-radius:8px;opacity:.95;z-index:9999";
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 1200);
+}
+
+/* ---- state we need for copy buttons ---- */
+let _lastBuyLists = { MM: [], PB: [], IL: [] };
+let _lastP1Path = "";
+let _lastP2Path = "";
 
 /* small renderer for bands cards */
 function renderBands(targetId, bands) {
@@ -22,7 +40,9 @@ function renderBands(targetId, bands) {
   ];
   clear(host);
   for (const it of items) {
-    const [lo, hi] = bands[it.k] || ["–","–"];
+    const b = bands[it.k] || ["–","–"];
+    const lo = Array.isArray(b) ? b[0] : "–";
+    const hi = Array.isArray(b) ? b[1] : "–";
     host.appendChild(el("div",
       `<div class="card">
         <div class="card-title">${it.title}</div>
@@ -52,7 +72,6 @@ function fillAgg(tbodyId, types, src) {
   for (const t of types) {
     const pos = (src && src[t]) ? src[t] : [];
     const count = Array.isArray(pos) ? pos.length : 0;
-    // count top positions (frequency by row number)
     const freq = {};
     (pos || []).forEach(p => { freq[p] = (freq[p] || 0) + 1; });
     const top = Object.entries(freq)
@@ -69,7 +88,7 @@ function fillBuy(tbodyId, rows, hasBonus=false) {
   const tbody = $(tbodyId);
   clear(tbody);
   (rows || []).forEach((t, i) => {
-    const mains = t.mains ? t.mains.join(", ") : "";
+    const mains = (t.mains || []).join(", ");
     const bonus = t.bonus ?? "";
     tbody.appendChild(el("tr", `<td>${i+1}</td><td>${mains}</td>${hasBonus?`<td>${bonus}</td>`:""}`));
   });
@@ -80,12 +99,8 @@ async function getRecent(intoId) {
   const box = $(intoId);
   const res = await fetch(RECENT_URL);
   const data = await res.json().catch(()=>({}));
-  if (!res.ok || !Array.isArray(data.files || data)) {
-    box.textContent = "No recent files.";
-    return;
-  }
-  const files = data.files || data;
-  box.textContent = files.join("\n");
+  const files = Array.isArray(data.files) ? data.files : (Array.isArray(data) ? data : []);
+  box.textContent = files.length ? files.join("\n") : "No recent files.";
 }
 
 /* ----------------------- Phase 1 ----------------------- */
@@ -125,9 +140,9 @@ async function runPhase1() {
   fillExact("ilm1-exact", ["3","4","5","6"], il.M1 || {});
   fillExact("ilm2-exact", ["3","4","5","6"], il.M2 || {});
 
-  $("p1-saved").textContent = "Saved Phase-1 state: " + (data.saved_path || "(none)");
-  // Pre-fill Phase 2 path
-  $("phase1_path").value = data.saved_path || "";
+  _lastP1Path = data.saved_path || "";
+  $("p1-saved").textContent = "Saved Phase-1 state: " + (_lastP1Path || "(none)");
+  $("phase1_path").value = _lastP1Path;  // prefill Phase 2 input
 }
 
 /* ----------------------- Phase 2 ----------------------- */
@@ -162,9 +177,11 @@ async function runPhase2() {
   fillAgg("ilm1-agg", ["3","4","5","6"], il.M1 || {});
   fillAgg("ilm2-agg", ["3","4","5","6"], il.M2 || {});
 
-  $("p2-saved").textContent = "Saved Phase-2 state: " + (data.saved_path || "(none)");
-  // Pre-fill Phase 3 path
-  $("phase2_path_confirm").value = data.saved_path || "";
+  _lastBuyLists = { MM: bl.MM || [], PB: bl.PB || [], IL: bl.IL || [] };
+
+  _lastP2Path = data.saved_path || "";
+  $("p2-saved").textContent = "Saved Phase-2 state: " + (_lastP2Path || "(none)");
+  $("phase2_path_confirm").value = _lastP2Path;  // prefill Phase 3 input
 }
 
 /* ----------------------- Phase 3 — Confirmation ----------------------- */
@@ -214,9 +231,44 @@ function renderConfirmBoxes(hitObj) {
   ["mm-rows","pb-rows","iljp-rows","ilm1-rows","ilm2-rows"].forEach(fillTable);
 }
 
+/* -------- format for copy buy list -------- */
+function formatBuyListText(tag, rows, hasBonus=false) {
+  const lines = [`${tag} buy list:`];
+  (rows || []).forEach((t, i) => {
+    const mains = (t.mains || []).join(", ");
+    const bonus = hasBonus && t.bonus != null ? `  [bonus ${t.bonus}]` : "";
+    lines.push(`${String(i+1).padStart(2," ")}. ${mains}${bonus}`);
+  });
+  return lines.join("\n");
+}
+
 /* ----------------------- events ----------------------- */
 $("btnRun1")?.addEventListener("click", runPhase1);
 $("btnRun2")?.addEventListener("click", runPhase2);
 $("btnConfirm")?.addEventListener("click", confirmPhase3);
 $("btnRecent")?.addEventListener("click", () => getRecent("recentList"));
 $("btnRecent2")?.addEventListener("click", () => getRecent("recentList"));
+
+// Copy saved paths
+$("btnCopyP1")?.addEventListener("click", () => {
+  if (!_lastP1Path) return alert("No saved Phase-1 path yet.");
+  copyText(_lastP1Path);
+});
+$("btnCopyP2")?.addEventListener("click", () => {
+  if (!_lastP2Path) return alert("No saved Phase-2 path yet.");
+  copyText(_lastP2Path);
+});
+
+// Copy buy lists (from last Phase-2 result)
+$("copyMM")?.addEventListener("click", () => {
+  if (!_lastBuyLists.MM.length) return alert("Run Phase 2 first.");
+  copyText(formatBuyListText("MM", _lastBuyLists.MM, true));
+});
+$("copyPB")?.addEventListener("click", () => {
+  if (!_lastBuyLists.PB.length) return alert("Run Phase 2 first.");
+  copyText(formatBuyListText("PB", _lastBuyLists.PB, true));
+});
+$("copyIL")?.addEventListener("click", () => {
+  if (!_lastBuyLists.IL.length) return alert("Run Phase 2 first.");
+  copyText(formatBuyListText("IL", _lastBuyLists.IL, false));
+});
