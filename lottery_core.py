@@ -654,3 +654,96 @@ def health() -> dict:
         return {"ok": True, "core_loaded": True, "err": None}
     except Exception as e:
         return {"ok": True, "core_loaded": False, "err": f"{type(e).__name__}: {e}"}
+
+# =========================
+# COMPATIBILITY APPENDIX
+# Ensure the functions that app.py expects are present, forwarding to alternates if needed.
+# Append this block at the very bottom of lottery_core.py.
+# =========================
+from __future__ import annotations
+import os, sys, glob, json, traceback
+from typing import Any, Dict
+
+# Where we save JSON state files
+_DATA_DIR = os.environ.get("DATA_DIR", "/tmp")
+
+def _err(msg: str) -> Dict[str, Any]:
+    return {"ok": False, "error": "MissingFunction", "detail": msg}
+
+def _exists(name: str) -> bool:
+    return name in globals() and callable(globals()[name])
+
+# ---- Phase 1 wrapper ----
+if "handle_run" not in globals():
+    def handle_run(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Expected by app.py for Phase 1.
+        Tries to forward to your existing Phase-1 function if named differently.
+        """
+        # Try common alternative function names you may already have:
+        for alt in ("run_phase1", "phase1_run", "evaluate_phase1", "run_json_core"):
+            if _exists(alt):
+                try:
+                    return globals()[alt](payload)
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    return {"ok": False, "error": type(e).__name__, "detail": str(e), "trace": tb}
+        return _err("lottery_core.handle_run not defined and no known Phase-1 function found "
+                    "(looked for run_phase1 / evaluate_phase1 / run_json_core).")
+
+# ---- Phase 2 wrapper ----
+if "run_phase2" not in globals():
+    def run_phase2(saved_phase1_path: str) -> Dict[str, Any]:
+        """
+        Expected by app.py for Phase 2.
+        Tries to forward to your existing Phase-2 function if named differently.
+        """
+        for alt in ("phase2_run", "predict_phase2", "run_phase2_core"):
+            if _exists(alt):
+                try:
+                    return globals()[alt](saved_phase1_path)
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    return {"ok": False, "error": type(e).__name__, "detail": str(e), "trace": tb}
+        return _err("lottery_core.run_phase2 not defined and no known Phase-2 function found "
+                    "(looked for phase2_run / predict_phase2 / run_phase2_core).")
+
+# ---- Phase 3 wrapper ----
+if "handle_confirm" not in globals():
+    def handle_confirm(saved_phase2_path: str, nwj: Dict[str, Any] | None) -> Dict[str, Any]:
+        """
+        Expected by app.py for Phase 3.
+        Tries to forward to your existing Phase-3 function if named differently.
+        """
+        for alt in ("confirm_phase3", "phase3_confirm", "run_confirmation"):
+            if _exists(alt):
+                try:
+                    return globals()[alt](saved_phase2_path, nwj)
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    return {"ok": False, "error": type(e).__name__, "detail": str(e), "trace": tb}
+        return _err("lottery_core.handle_confirm not defined and no known Phase-3 function found "
+                    "(looked for confirm_phase3 / phase3_confirm / run_confirmation).")
+
+# ---- Recent files helper ----
+if "list_recent" not in globals():
+    def list_recent() -> list[str]:
+        """
+        Returns a list of recent Phase-1/2 JSON files in DATA_DIR (default /tmp).
+        """
+        patterns = [
+            os.path.join(_DATA_DIR, "lotto_phase1_*.json"),
+            os.path.join(_DATA_DIR, "lotto_phase2_*.json"),
+        ]
+        files = []
+        for pat in patterns:
+            for f in glob.glob(pat):
+                try:
+                    mtime = os.path.getmtime(f)
+                except OSError:
+                    mtime = 0
+                files.append((mtime, f))
+        files.sort(reverse=True)
+        # Return just the paths, most recent first, limit to 100
+        return [f for _, f in files][:100]
+
