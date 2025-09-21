@@ -4,6 +4,37 @@ from __future__ import annotations
 import json, os, re, random, datetime
 from typing import List, Tuple, Dict, Optional
 
+# ----------- Phase-2 hit labeling helper -----------
+def _label_hit(game: str,
+               mains: list[int],
+               bonus: int | None,
+               target_mains: list[int],
+               target_bonus: int | None) -> str | None:
+    """
+    Return a hit label for a row vs the target draw.
+
+    MM/PB (with bonus): '3','3B','4','4B','5','5B'
+    IL (no bonus)     : '3','4','5','6'
+    """
+    # how many main balls match?
+    m = len(set(mains) & set(target_mains))
+
+    if game in ("MM", "PB"):
+        b = (bonus is not None and target_bonus is not None and bonus == target_bonus)
+        if m == 5: return "5B" if b else "5"
+        if m == 4: return "4B" if b else "4"
+        if m == 3: return "3B" if b else "3"
+        return None
+
+    if game == "IL":
+        if m == 6: return "6"
+        if m == 5: return "5"
+        if m == 4: return "4"
+        if m == 3: return "3"
+        return None
+
+    return None
+
 RNG = random.Random()
 
 DEFAULT_SUM_BANDS = {"MM": (155, 201), "PB": (146, 207), "IL": (121, 158)}
@@ -495,3 +526,97 @@ def handle_confirm(payload: Dict, data_dir: str) -> Dict:
 
     return {"ok": True, "phase": "phase3",
             "confirm_hits": {"MM": mm_stats, "PB": pb_stats, "IL": {"JP": il_jp, "M1": il_m1, "M2": il_m2}}}
+
+def run_phase2(saved_phase1_path: str):
+    """
+    Load Phase-1 state and run 100 regenerations of 50-row batches, labeling each
+    row’s hit and aggregating the row positions that hit. Produces buy_lists and agg_hits.
+    """
+    import json, os
+    from datetime import datetime
+
+    data_dir = globals().get("DATA_DIR", "/tmp")
+
+    # --- load Phase-1 saved state
+    with open(saved_phase1_path, "r", encoding="utf-8") as f:
+        p1 = json.load(f)
+
+    # --- rebuild internal state using your existing helper
+    # If your helper is named differently, keep your name here.
+    state = rebuild_state_from_phase1(p1)
+
+    # targets from Phase-1 (NJ at evaluation time)
+    t_mm_mains, t_mm_bonus = p1["LATEST_MM"][0], p1["LATEST_MM"][1]
+    t_pb_mains, t_pb_bonus = p1["LATEST_PB"][0], p1["LATEST_PB"][1]
+    t_il_jp = p1["LATEST_IL_JP"][0]
+    t_il_m1 = p1["LATEST_IL_M1"][0]
+    t_il_m2 = p1["LATEST_IL_M2"][0]
+
+    # aggregation buckets (arrays of positions the UI understands)
+    MM_KEYS = ["3","3B","4","4B","5","5B"]
+    PB_KEYS = ["3","3B","4","4B","5","5B"]
+    IL_KEYS = ["3","4","5","6"]
+    agg = {
+        "MM": {k: [] for k in MM_KEYS},
+        "PB": {k: [] for k in PB_KEYS},
+        "IL": {
+            "JP": {k: [] for k in IL_KEYS},
+            "M1": {k: [] for k in IL_KEYS},
+            "M2": {k: [] for k in IL_KEYS},
+        },
+    }
+
+    last_buys = None
+
+    # --- run 100 simulations
+    for _ in range(100):
+        # Use your existing generator that returns the Phase-1-like "batches" structure.
+        # If your function is named differently, keep your name here.
+        runs = generate_batches(state)
+
+        # label + tally MM
+        for r in runs.get("MM", []):
+            r["hit"] = _label_hit("MM", r.get("mains", []), r.get("bonus"),
+                                  t_mm_mains, t_mm_bonus)
+            if r["hit"] in agg["MM"]:
+                agg["MM"][r["hit"]].append(int(r.get("row", 0)))
+
+        # label + tally PB
+        for r in runs.get("PB", []):
+            r["hit"] = _label_hit("PB", r.get("mains", []), r.get("bonus"),
+                                  t_pb_mains, t_pb_bonus)
+            if r["hit"] in agg["PB"]:
+                agg["PB"][r["hit"]].append(int(r.get("row", 0)))
+
+        # label + tally IL (JP/M1/M2)
+        for bucket, target in (("JP", t_il_jp), ("M1", t_il_m1), ("M2", t_il_m2)):
+            for r in runs.get("IL", {}).get(bucket, []):
+                r["hit"] = _label_hit("IL", r.get("mains", []), None, target, None)
+                if r["hit"] in agg["IL"][bucket]:
+                    agg["IL"][bucket][r["hit"]].append(int(r.get("row", 0)))
+
+        # keep your recommended tickets from this run (or recompute after the loop)
+        last_buys = recommend_buy_lists(state, runs)
+
+        # if your design evolves state each loop, keep that call:
+        # state = evolve_state(state, runs)
+
+    result = {
+        "ok": True,
+        "phase": "phase2",
+        "bands": p1.get("bands", {}),
+        "buy_lists": last_buys or {"MM": [], "PB": [], "IL": []},
+        "agg_hits": agg,  # <-- UI reads this
+        "note": "Use saved_path for Phase 3 confirmation after the next official draw.",
+    }
+
+    # persist Phase-2 state
+    try:
+        out_path = os.path.join(data_dir, f"lotto_phase2_{datetime.now():%Y-%m-%d_%H-%M-%S}.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        result["saved_path"] = out_path
+    except Exception:
+        result["saved_path"] = None
+
+    return result
