@@ -660,8 +660,7 @@ def health() -> dict:
 # Ensure the functions that app.py expects are present, forwarding to alternates if needed.
 # Append this block at the very bottom of lottery_core.py.
 # =========================
-from __future__ import annotations
-import os, sys, glob, json, traceback
+import os, glob, json, traceback
 from typing import Any, Dict
 
 # Where we save JSON state files
@@ -680,7 +679,6 @@ if "handle_run" not in globals():
         Expected by app.py for Phase 1.
         Tries to forward to your existing Phase-1 function if named differently.
         """
-        # Try common alternative function names you may already have:
         for alt in ("run_phase1", "phase1_run", "evaluate_phase1", "run_json_core"):
             if _exists(alt):
                 try:
@@ -744,6 +742,4 @@ if "list_recent" not in globals():
                     mtime = 0
                 files.append((mtime, f))
         files.sort(reverse=True)
-        # Return just the paths, most recent first, limit to 100
         return [f for _, f in files][:100]
-
