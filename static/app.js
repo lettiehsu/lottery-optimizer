@@ -1,7 +1,7 @@
 /* static/app.js — full UI logic for Phases 1/2/3 with copy buttons */
 
 const RUN1_URL = "/run_json";      // Phase 1
-const RUN2_URL = "/run_json";      // Phase 2 (your backend expects saved_path on /run_json)
+const RUN2_URL = "/run_phase2";    // Phase 2  <-- important
 const CONFIRM_URL = "/confirm_json";
 const RECENT_URL = "/recent";
 
