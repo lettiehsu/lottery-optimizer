@@ -27,17 +27,6 @@
   <div class="wrap">
     <h1>Lottery Optimizer</h1>
 
-    <!-- CSV upload stays the same -->
-    <h2>Bulk import history (CSV)</h2>
-    <div class="card">
-      <form id="csv_form">
-        <input type="file" id="csv_file" accept=".csv"/>
-        <label class="muted"><input type="checkbox" id="overwrite" checked/> Overwrite existing data</label>
-        <button class="btn" id="btn_import" type="submit">Import CSV</button>
-      </form>
-      <pre id="import_out" class="mono muted">—</pre>
-    </div>
-
     <!-- PHASE 1 -->
     <h2>Bulk import history (CSV)</h2>
     <div class="card">
@@ -48,9 +37,9 @@
         </label>
         <button class="btn" id="btn_import" type="button">Import CSV</button>
       </form>
-      <div class="muted" id="csv_selected" style="margin-top:6px">—</div>
+      <div id="csv_selected" class="muted" style="margin-top:6px">—</div>
       <pre id="import_out" class="mono muted">—</pre>
-   </div>
+    </div>
 
         <label for="mm_date">Mega Millions</label>
         <input id="mm_date" type="date" />
