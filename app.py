@@ -1,66 +1,111 @@
-import os, traceback, json
-from flask import Flask, request, jsonify, render_template, send_from_directory
+# app.py — Flask API for Lottery Optimizer (works with the new lottery_core.py)
 
-# ---- Settings ----
-SAFE_MODE = int(os.getenv("SAFE_MODE", "0") or "0")  # keep at 0 for full features
-DATA_DIR = os.getenv("DATA_DIR", "/tmp")
+import os
+from flask import Flask, request, jsonify, send_from_directory, render_template
 
-# ---- App ----
+from lottery_core import (
+    run_phase1,
+    run_phase2,
+    run_phase3,
+    list_recent_files,
+    health as core_health,
+)
+
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(APP_ROOT, "static")
+TEMPLATES_DIR = os.path.join(APP_ROOT, "templates")
+
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# ---- Try load core ----
-CORE_ERR = None
-try:
-    import lottery_core as core
-except Exception as e:
-    CORE_ERR = f"{e.__class__.__name__}: {e}"
 
-@app.route("/")
-def index():
+# ----------------------------- UI ---------------------------------
+@app.route("/", methods=["GET"])
+def home():
+    """
+    Render the single-page UI (templates/index.html).
+    """
+    # If you don't have templates/index.html, comment the next line and uncomment the return below.
     return render_template("index.html")
 
-@app.route("/health")
-def health():
-    return jsonify({"ok": True, "core_loaded": CORE_ERR is None, "err": CORE_ERR})
+    # Fallback (plain text) if you prefer not to use a template:
+    # return (
+    #     "Lottery Optimizer API (UI not found)\n\n"
+    #     "POST /run_json with form fields LATEST_* to generate & simulate.\n"
+    #     "POST /confirm_json with saved_path & NWJ_* to confirm.\n"
+    #     "GET  /recent for recent saved buy files.\n"
+    #     "GET  /health to check service.\n"
+    # )
 
-@app.route("/static/<path:path>")
-def serve_static(path):
-    return send_from_directory("static", path)
 
-@app.post("/run_json")
+# --------------------------- JSON API ------------------------------
+@app.route("/run_json", methods=["POST"])
 def run_json():
-    if SAFE_MODE:
-        return jsonify({"ok": False, "error": "SAFE_MODE is on"}), 400
-    if CORE_ERR:
-        return jsonify({"ok": False, "error": CORE_ERR}), 500
+    """
+    Phase router:
+      - Phase 1: expects the LATEST_*, FEED_*, HIST_*_BLOB fields in JSON body.
+      - Phase 2: expects {"phase": "phase2", "saved_path": "<from phase1>"}.
+    """
     try:
-        payload = request.get_json(silent=True) or {}
-        result = core.handle_run(payload, DATA_DIR)
-        return jsonify(result)
+        data = request.get_json(force=True, silent=False) or {}
     except Exception as e:
-        return jsonify({"ok": False, "error": e.__class__.__name__, "detail": str(e)}), 400
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
-@app.post("/confirm_json")
+    phase = (data.get("phase") or "").lower()
+
+    # Phase 2
+    if phase == "phase2":
+        saved_path = data.get("saved_path")
+        if not saved_path:
+            return jsonify({"ok": False, "error": "ValueError", "detail": "Missing saved_path for phase2"}), 400
+        out = run_phase2(saved_path)
+        return jsonify(out), (200 if out.get("ok") else 400)
+
+    # Default to Phase 1 if phase not specified (or explicitly phase1)
+    out = run_phase1(data)
+    return jsonify(out), (200 if out.get("ok") else 400)
+
+
+@app.route("/confirm_json", methods=["POST"])
 def confirm_json():
-    if SAFE_MODE:
-        return jsonify({"ok": False, "error": "SAFE_MODE is on"}), 400
-    if CORE_ERR:
-        return jsonify({"ok": False, "error": CORE_ERR}), 500
+    """
+    Phase 3: confirm buy lists vs newest jackpot (NWJ).
+      Body: {"saved_path": "<phase2 json>", "NWJ": {...optional...}}
+    """
     try:
-        payload = request.get_json(silent=True) or {}
-        result = core.handle_confirm(payload, DATA_DIR)
-        return jsonify(result)
+        data = request.get_json(force=True, silent=False) or {}
     except Exception as e:
-        return jsonify({"ok": False, "error": e.__class__.__name__, "detail": str(e)}), 400
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
-@app.get("/recent")
+    saved_path = data.get("saved_path")
+    if not saved_path:
+        return jsonify({"ok": False, "error": "ValueError", "detail": "Missing saved_path"}), 400
+
+    nwj = data.get("NWJ") or None
+    out = run_phase3(saved_path, nwj)
+    return jsonify(out), (200 if out.get("ok") else 400)
+
+
+@app.route("/recent", methods=["GET"])
 def recent():
-    if CORE_ERR:
-        return jsonify({"ok": False, "error": CORE_ERR}), 500
-    try:
-        return jsonify(core.list_recent(DATA_DIR))
-    except Exception:
-        return jsonify({"ok": False, "error": "list error"}), 500
+    files = list_recent_files()
+    return jsonify({"ok": True, "files": files})
 
+
+@app.route("/health", methods=["GET"])
+def health():
+    # Ask the core if it loaded; include a friendly message if template missing.
+    h = core_health()
+    return jsonify(h)
+
+
+# -------------------------- Static files --------------------------
+@app.route("/static/<path:filename>")
+def static_files(filename):
+    return send_from_directory(STATIC_DIR, filename)
+
+
+# -------------------------- Entrypoint ----------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")), debug=False)
+    # Local dev run: `python app.py`
+    port = int(os.environ.get("PORT", "8000"))
+    app.run(host="0.0.0.0", port=port, debug=bool(os.environ.get("DEBUG")))
