@@ -1,351 +1,223 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Lottery Optimizer</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
   <style>
-    :root {
-      --bg: #ffffff;
-      --fg: #111827;
-      --muted: #6b7280;
-      --card: #f8fafc;
-      --accent: #2563eb;
-      --accent-2: #0ea5e9;
-      --border: #e5e7eb;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-    html, body { background: var(--bg); color: var(--fg); margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
-    .wrap { max-width: 1100px; margin: 28px auto 80px; padding: 0 16px; }
-    h1 { font-size: 28px; margin: 0 0 8px; }
-    .muted { color: var(--muted); font-size: 14px; }
-    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
-    .col-12 { grid-column: span 12; }
-    .col-6  { grid-column: span 6; }
-    .col-4  { grid-column: span 4; }
-    .col-3  { grid-column: span 3; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
-    .card-title { font-weight: 700; margin-bottom: 8px; }
-    .btn { border: 1px solid var(--border); background: #fff; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
-    .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .btn.secondary { background: #fff; color: var(--fg); }
-    .btn:disabled { opacity: .6; cursor: not-allowed; }
-    textarea, input[type="text"] { width: 100%; min-height: 80px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-family: var(--mono); }
-    input[type="text"] { min-height: 0; height: 40px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
-    .mono { font-family: var(--mono); }
-    .pill { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; }
-    .k { font-weight: 600; }
+    :root{--bg:#ffffff;--fg:#111;--muted:#666;--card:#f7f7f8;--accent:#0d6efd}
+    body{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;margin:0}
+    header{padding:16px 20px;border-bottom:1px solid #eee}
+    h1{margin:0;font-size:20px}
+    main{max-width:1100px;margin:0 auto;padding:16px}
+    .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+    .col{flex:1 1 320px;min-width:300px}
+    textarea, input[type="text"]{width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:8px;padding:10px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+    textarea{min-height:120px}
+    .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 14px;cursor:pointer}
+    .btn.secondary{background:#444}
+    .btn.ghost{background:#e9ecef;color:#111}
+    .btn.small{padding:6px 10px;border-radius:8px;font-size:12px}
+    .card{background:var(--card);border:1px solid #eee;border-radius:12px;padding:12px}
+    .card-title{font-weight:600;margin-bottom:6px}
+    .muted{color:var(--muted);font-size:12px}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+    table{width:100%;border-collapse:collapse}
+    th, td{border-top:1px solid #e9e9e9;padding:6px 8px;text-align:left;font-size:13px}
+    th{background:#f2f2f3}
+    .section{margin:16px 0 22px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+    .copy-wrap{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .path{font-size:12px;color:#333;word-break:break-all}
+    #blobView{white-space:pre;display:none}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Lottery Optimizer</h1>
-    <div class="muted">Phase 1 → Phase 2 → Phase 3, with history storage & BLOB viewer</div>
+<header>
+  <h1>Lottery Optimizer</h1>
+</header>
+<main>
 
-    <!-- ========= Phase 1 ========= -->
-    <section class="card" style="margin-top:16px;">
-      <div class="row">
-        <div class="card-title">Phase 1 — Evaluation vs NJ (newest jackpot for training)</div>
-        <span class="pill">Top 20 lines only</span>
-      </div>
+  <!-- ===== Phase 1 ===== -->
+  <div class="section">
+    <h2>Phase 1 — Evaluation</h2>
 
-      <!-- New: History controls -->
-      <div class="row" style="gap:8px; margin:8px 0 12px;">
-        <button id="btnSaveToHist" class="btn secondary" title="Save current LATEST_* into history DB">Save current NJ → History</button>
-        <button id="btnShowMMBlob" class="btn secondary" title="Show stored MM top-20 blob">Show MM BLOB</button>
-        <button id="btnShowPBBlob" class="btn secondary" title="Show stored PB top-20 blob">Show PB BLOB</button>
-        <button id="btnShowILBlob" class="btn secondary" title="Show stored IL top-20 blob">Show IL BLOB</button>
-      </div>
-      <div id="blobView" class="card mono" style="white-space:pre; display:none;"></div>
+    <!-- NEW: Autofill buttons -->
+    <div class="row" style="gap:8px;margin:6px 0 10px;">
+      <button id="btnAutoP1" class="btn ghost" title="3rd newest jackpots → Phase 1 boxes">Autofill Phase 1 (3rd newest)</button>
+      <button id="btnAutoP2" class="btn ghost" title="2nd newest jackpots → Phase 1 boxes">Autofill Phase 2 (2nd newest)</button>
+      <button id="btnAutoP3" class="btn secondary" title="Newest jackpots → Phase 3 NWJ">Autofill Phase 3 (NWJ)</button>
+    </div>
 
-      <div class="grid" style="margin-top:12px;">
-        <div class="col-4">
-          <div class="card-title">Newest Jackpots (NJ)</div>
-          <div class="muted">Format: <span class="mono">[mains], bonus</span> (IL: enter just six mains)</div>
-          <div class="row" style="gap:6px; margin-top:8px;">
-            <span class="k">MM</span>
-            <input id="LATEST_MM" type="text" placeholder="[10, 14, 34, 40, 43], 5"/>
-          </div>
-          <div class="row" style="gap:6px; margin-top:8px;">
-            <span class="k">PB</span>
-            <input id="LATEST_PB" type="text" placeholder="[14, 15, 32, 42, 49], 1"/>
-          </div>
-          <div class="row" style="gap:6px; margin-top:8px;">
-            <span class="k">IL JP</span>
-            <input id="LATEST_IL_JP" type="text" placeholder="[1, 4, 5, 10, 18, 49]"/>
-          </div>
-          <div class="row" style="gap:6px; margin-top:8px;">
-            <span class="k">IL M1</span>
-            <input id="LATEST_IL_M1" type="text" placeholder="[6, 8, 10, 18, 26, 27]"/>
-          </div>
-          <div class="row" style="gap:6px; margin-top:8px;">
-            <span class="k">IL M2</span>
-            <input id="LATEST_IL_M2" type="text" placeholder="[2, 18, 21, 27, 43, 50]"/>
-          </div>
+    <!-- History repo: save and view -->
+    <div class="row" style="gap:8px;margin:6px 0 12px;">
+      <button id="btnSaveToHist" class="btn secondary" title="Save current NJ entries to history">Save current NJ → History</button>
+      <button id="btnShowMMBlob" class="btn ghost">Show MM BLOB</button>
+      <button id="btnShowPBBlob" class="btn ghost">Show PB BLOB</button>
+      <button id="btnShowILBlob" class="btn ghost">Show IL BLOB</button>
+    </div>
+    <div id="blobView" class="card mono"></div>
+
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <div class="card-title">Newest jackpots (NJ) — paste here</div>
+          <div class="muted">Formats:</div>
+          <ul class="muted" style="margin:6px 0 10px 16px">
+            <li>MM/PB: <span class="mono">[10,14,34,40,43], 5</span></li>
+            <li>IL sets: <span class="mono">[1,4,5,10,18,49]</span></li>
+          </ul>
+          <label class="muted">Mega Millions</label>
+          <input id="LATEST_MM" type="text" placeholder="[a,b,c,d,e], m"/>
+          <label class="muted" style="margin-top:10px;display:block">Powerball</label>
+          <input id="LATEST_PB" type="text" placeholder="[a,b,c,d,e], p"/>
+          <label class="muted" style="margin-top:10px;display:block">IL Lotto — Jackpot</label>
+          <input id="LATEST_IL_JP" type="text" placeholder="[a,b,c,d,e,f]"/>
+          <label class="muted" style="margin-top:10px;display:block">IL Lotto — Million 1</label>
+          <input id="LATEST_IL_M1" type="text" placeholder="[a,b,c,d,e,f]"/>
+          <label class="muted" style="margin-top:10px;display:block">IL Lotto — Million 2</label>
+          <input id="LATEST_IL_M2" type="text" placeholder="[a,b,c,d,e,f]"/>
         </div>
+      </div>
 
-        <div class="col-4">
+      <div class="col">
+        <div class="card">
           <div class="card-title">Feeds (Lottery Defeated)</div>
-          <div class="muted">Paste exactly as provided</div>
-          <textarea id="FEED_MM" placeholder='FEED_MM = "
-Top 8 hot numbers: 10, 40, 6, 17, 24, 18, 16, 49
-Top 8 overdue numbers: 53, 3, 5, 15, 51, 9, 66, 37
-Top 3 hot Mega Ball numbers: 1, 24, 2
-Top 3 overdue Mega Ball numbers: 4, 6, 15
-"'></textarea>
-          <textarea id="FEED_PB" placeholder='FEED_PB = "
-Top 8 hot numbers: 23, 61, 35, 28, 43, 62, 64, 52
-Top 8 overdue numbers: 66, 39, 20, 10, 56, 30, 17, 32
-Top 3 hot Power Ball numbers: 25, 5, 2
-Top 3 overdue Power Ball numbers: 16, 26, 7
-"'></textarea>
-          <textarea id="FEED_IL" placeholder='FEED_IL = "
-Top 8 hot numbers: 17, 20, 22, 14, 5, 1, 6, 3
-Top 8 overdue numbers: 28, 35, 46, 38, 33, 37, 39, 25
-"'></textarea>
-        </div>
-
-        <div class="col-4">
-          <div class="card-title">History blobs (top-down, newest first)</div>
-          <div class="muted">MM/PB lines: <span class="mono">05-16-29-44-66 07</span> • IL lines: <span class="mono">05-06-14-15-48-49</span></div>
-          <textarea id="HIST_MM_BLOB" placeholder="MM 20 lines"></textarea>
-          <textarea id="HIST_PB_BLOB" placeholder="PB 20 lines"></textarea>
-          <textarea id="HIST_IL_BLOB" placeholder="IL 20 lines (JP only)"></textarea>
+          <label class="muted">MM feed</label>
+          <textarea id="FEED_MM" placeholder='Top 8 hot numbers: ...'></textarea>
+          <label class="muted" style="margin-top:10px;display:block">PB feed</label>
+          <textarea id="FEED_PB" placeholder='Top 8 hot numbers: ...'></textarea>
+          <label class="muted" style="margin-top:10px;display:block">IL feed</label>
+          <textarea id="FEED_IL" placeholder='Top 8 hot numbers: ...'></textarea>
         </div>
       </div>
 
-      <div class="row" style="margin-top:10px;">
-        <button id="btnRun1" class="btn primary">Run Phase 1</button>
-        <button id="btnCopyP1" class="btn">Copy saved Phase-1 path</button>
-        <span id="p1-saved" class="muted"></span>
-      </div>
-
-      <div class="grid" style="margin-top:12px;">
-        <div class="col-4 card">
-          <div class="card-title">Bands</div>
-          <div id="bands"></div>
-        </div>
-        <div class="col-8 card">
-          <div class="card-title">Exact rows that hit vs NJ</div>
-          <div class="grid">
-            <div class="col-6">
-              <div class="k">Mega Millions</div>
-              <table>
-                <thead><tr><th>Type</th><th>Row positions</th></tr></thead>
-                <tbody id="mm-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody>
-              </table>
-            </div>
-            <div class="col-6">
-              <div class="k">Powerball</div>
-              <table>
-                <thead><tr><th>Type</th><th>Row positions</th></tr></thead>
-                <tbody id="pb-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody>
-              </table>
-            </div>
-            <div class="col-12" style="margin-top:8px;">
-              <div class="k">Illinois Lotto (JP/M1/M2)</div>
-              <div class="grid">
-                <div class="col-4">
-                  <table>
-                    <thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                    <tbody id="iljp-exact" data-types='["3","4","5","6"]'></tbody>
-                  </table>
-                </div>
-                <div class="col-4">
-                  <table>
-                    <thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                    <tbody id="ilm1-exact" data-types='["3","4","5","6"]'></tbody>
-                  </table>
-                </div>
-                <div class="col-4">
-                  <table>
-                    <thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                    <tbody id="ilm2-exact" data-types='["3","4","5","6"]'></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div> <!-- grid -->
+      <div class="col">
+        <div class="card">
+          <div class="card-title">Historical blobs (top-down, newest first)</div>
+          <label class="muted">HIST_MM_BLOB</label>
+          <textarea id="HIST_MM_BLOB" placeholder="05-16-29-44-66 07&#10;..."></textarea>
+          <label class="muted" style="margin-top:10px;display:block">HIST_PB_BLOB</label>
+          <textarea id="HIST_PB_BLOB" placeholder="14-15-32-42-49 01&#10;..."></textarea>
+          <label class="muted" style="margin-top:10px;display:block">HIST_IL_BLOB</label>
+          <textarea id="HIST_IL_BLOB" placeholder="05-06-14-15-48-49&#10;..."></textarea>
         </div>
       </div>
-    </section>
+    </div>
 
-    <!-- ========= Phase 2 ========= -->
-    <section class="card" style="margin-top:16px;">
-      <div class="row">
-        <div class="card-title">Phase 2 — Prediction (100× 50-row runs)</div>
-      </div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnRun1" class="btn">Run Phase 1</button>
+      <button id="btnRecent" class="btn ghost">GET /recent</button>
+    </div>
 
-      <div class="row" style="gap:8px;">
-        <input id="phase1_path" type="text" placeholder="/tmp/lotto_phase1_....json" class="mono" style="flex:1;"/>
-        <button id="btnRun2" class="btn primary">Run Phase 2</button>
-        <button id="btnCopyP2" class="btn">Copy saved Phase-2 path</button>
+    <div class="row" style="margin-top:10px">
+      <div class="copy-wrap">
+        <div id="p1-saved" class="path mono"></div>
+        <button id="btnCopyP1" class="btn small ghost">Copy</button>
       </div>
-      <div class="muted" id="p2-saved" style="margin-top:6px;"></div>
+    </div>
 
-      <div class="grid" style="margin-top:12px;">
-        <div class="col-4 card">
-          <div class="card-title">Bands</div>
-          <div id="p2-bands"></div>
-        </div>
-        <div class="col-8 card">
-          <div class="card-title">Buy lists</div>
-          <div class="grid">
-            <div class="col-4">
-              <div class="row" style="justify-content:space-between;">
-                <div class="k">MM (10)</div>
-                <button id="copyMM" class="btn">Copy</button>
-              </div>
-              <table>
-                <thead><tr><th>#</th><th>Mains</th><th>MB</th></tr></thead>
-                <tbody id="mm-buy"></tbody>
-              </table>
-            </div>
-            <div class="col-4">
-              <div class="row" style="justify-content:space-between;">
-                <div class="k">PB (10)</div>
-                <button id="copyPB" class="btn">Copy</button>
-              </div>
-              <table>
-                <thead><tr><th>#</th><th>Mains</th><th>PB</th></tr></thead>
-                <tbody id="pb-buy"></tbody>
-              </table>
-            </div>
-            <div class="col-4">
-              <div class="row" style="justify-content:space-between;">
-                <div class="k">IL (15)</div>
-                <button id="copyIL" class="btn">Copy</button>
-              </div>
-              <table>
-                <thead><tr><th>#</th><th>Mains</th></tr></thead>
-                <tbody id="il-buy"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+    <div class="grid" style="margin-top:12px">
+      <div class="card"><div class="card-title">MM exact rows vs NJ</div><table><tbody id="mm-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
+      <div class="card"><div class="card-title">PB exact rows vs NJ</div><table><tbody id="pb-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
+      <div class="card"><div class="card-title">IL exact rows vs NJ</div>
+        <table><tbody id="iljp-exact" data-types='["3","4","5","6"]'></tbody></table>
+        <table><tbody id="ilm1-exact" data-types='["3","4","5","6"]'></tbody></table>
+        <table><tbody id="ilm2-exact" data-types='["3","4","5","6"]'></tbody></table>
+      </div>
+    </div>
 
-        <div class="col-12 card">
-          <div class="card-title">Aggregated hit positions in 100 runs</div>
-          <div class="grid">
-            <div class="col-4">
-              <div class="k">Mega Millions</div>
-              <table>
-                <thead><tr><th>Type</th><th>Total</th><th>Top positions (count)</th></tr></thead>
-                <tbody id="mm-agg"></tbody>
-              </table>
-            </div>
-            <div class="col-4">
-              <div class="k">Powerball</div>
-              <table>
-                <thead><tr><th>Type</th><th>Total</th><th>Top positions (count)</th></tr></thead>
-                <tbody id="pb-agg"></tbody>
-              </table>
-            </div>
-            <div class="col-4">
-              <div class="k">Illinois Lotto (JP/M1/M2)</div>
-              <div class="grid">
-                <div class="col-12">
-                  <div class="k" style="margin-top:6px;">JP</div>
-                  <table>
-                    <thead><tr><th>Type</th><th>Total</th><th>Top positions</th></tr></thead>
-                    <tbody id="iljp-agg"></tbody>
-                  </table>
-                </div>
-                <div class="col-12">
-                  <div class="k" style="margin-top:6px;">M1</div>
-                  <table>
-                    <thead><tr><th>Type</th><th>Total</th><th>Top positions</th></tr></thead>
-                    <tbody id="ilm1-agg"></tbody>
-                  </table>
-                </div>
-                <div class="col-12">
-                  <div class="k" style="margin-top:6px;">M2</div>
-                  <table>
-                    <thead><tr><th>Type</th><th>Total</th><th>Top positions</th></tr></thead>
-                    <tbody id="ilm2-agg"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div><!-- grid -->
-        </div>
-      </div>
-    </section>
+    <div class="grid" style="margin-top:12px">
+      <div class="card"><div class="card-title">Bands — IL</div><div id="bands" class="mono"></div></div>
+      <div class="card"><div class="card-title">Bands — MM</div><div class="mono" id="bands_mm"></div></div>
+      <div class="card"><div class="card-title">Bands — PB</div><div class="mono" id="bands_pb"></div></div>
+    </div>
 
-    <!-- ========= Phase 3 ========= -->
-    <section class="card" style="margin-top:16px;">
-      <div class="row">
-        <div class="card-title">Phase 3 — Confirmation vs NWJ</div>
-      </div>
-      <div class="grid">
-        <div class="col-6">
-          <div class="row" style="gap:8px;">
-            <input id="phase2_path_confirm" type="text" placeholder="/tmp/lotto_phase2_....json" class="mono" style="flex:1;"/>
-            <button id="btnConfirm" class="btn primary">Confirm vs NWJ</button>
-          </div>
-          <div class="muted" style="margin:8px 0;">Paste NWJ JSON (any subset): LATEST_MM, LATEST_PB, LATEST_IL_JP, LATEST_IL_M1, LATEST_IL_M2</div>
-          <textarea id="nwj_json" placeholder='{"LATEST_MM": [[10,14,34,40,43], 5]}'></textarea>
-        </div>
-        <div class="col-6">
-          <div class="grid">
-            <div class="col-6 card">
-              <div class="k">Mega Millions rows that hit</div>
-              <table><thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                <tbody id="mm-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody>
-              </table>
-            </div>
-            <div class="col-6 card">
-              <div class="k">Powerball rows that hit</div>
-              <table><thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                <tbody id="pb-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody>
-              </table>
-            </div>
-            <div class="col-12 card">
-              <div class="k">Illinois rows that hit</div>
-              <div class="grid">
-                <div class="col-4">
-                  <div class="muted">JP</div>
-                  <table><thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                    <tbody id="iljp-rows" data-types='["3","4","5","6"]'></tbody>
-                  </table>
-                </div>
-                <div class="col-4">
-                  <div class="muted">M1</div>
-                  <table><thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                    <tbody id="ilm1-rows" data-types='["3","4","5","6"]'></tbody>
-                  </table>
-                </div>
-                <div class="col-4">
-                  <div class="muted">M2</div>
-                  <table><thead><tr><th>Type</th><th>Rows</th></tr></thead>
-                    <tbody id="ilm2-rows" data-types='["3","4","5","6"]'></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div><!-- grid -->
-        </div>
-      </div>
-    </section>
-
-    <!-- ========= Recent ========= -->
-    <section class="card" style="margin-top:16px;">
-      <div class="row">
-        <div class="card-title">Recent saved files</div>
-        <button id="btnRecent" class="btn">Refresh</button>
-      </div>
-      <pre id="recentList" class="mono" style="white-space:pre-wrap;"></pre>
-      <div class="row" style="gap:8px; margin-top:10px;">
-        <a class="btn secondary" href="/hist_csv?game=MM">Download MM CSV</a>
-        <a class="btn secondary" href="/hist_csv?game=PB">Download PB CSV</a>
-        <a class="btn secondary" href="/hist_csv?game=IL">Download IL CSV</a>
-      </div>
-    </section>
+    <input id="phase1_path" type="text" style="width:100%;margin-top:10px" placeholder="(auto-filled) Phase-1 saved path for Phase 2"/>
   </div>
 
-  <script src="/static/app.js"></script>
+  <!-- ===== Phase 2 ===== -->
+  <div class="section">
+    <h2>Phase 2 — Prediction (100× runs)</h2>
+    <div class="row">
+      <input id="phase1_path_input" type="text" class="mono" style="flex:1" placeholder="Paste Phase-1 saved path (auto-filled)"/>
+      <button id="btnRun2" class="btn">Run Phase 2</button>
+      <button id="btnRecent2" class="btn ghost">GET /recent</button>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <div class="copy-wrap">
+        <div id="p2-saved" class="path mono"></div>
+        <button id="btnCopyP2" class="btn small ghost">Copy</button>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:12px">
+      <div class="card">
+        <div class="card-title">MM buy list (10)</div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button id="copyMM" class="btn small ghost">Copy list</button></div>
+        <table><thead><tr><th>#</th><th>Mains</th><th>MB</th></tr></thead><tbody id="mm-buy"></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title">PB buy list (10)</div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button id="copyPB" class="btn small ghost">Copy list</button></div>
+        <table><thead><tr><th>#</th><th>Mains</th><th>PB</th></tr></thead><tbody id="pb-buy"></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title">IL buy list (15)</div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button id="copyIL" class="btn small ghost">Copy list</button></div>
+        <table><thead><tr><th>#</th><th>Mains</th></tr></thead><tbody id="il-buy"></tbody></table>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:12px">
+      <div class="card"><div class="card-title">MM aggregated hits</div><table><thead><tr><th>Type</th><th>Count</th><th>Top positions</th></tr></thead><tbody id="mm-agg"></tbody></table></div>
+      <div class="card"><div class="card-title">PB aggregated hits</div><table><thead><tr><th>Type</th><th>Count</th><th>Top positions</th></tr></thead><tbody id="pb-agg"></tbody></table></div>
+      <div class="card">
+        <div class="card-title">IL aggregated hits</div>
+        <table><thead><tr><th>Type</th><th>Count</th><th>Top positions</th></tr></thead><tbody id="iljp-agg"></tbody></table>
+        <table><tbody id="ilm1-agg"></tbody></table>
+        <table><tbody id="ilm2-agg"></tbody></table>
+      </div>
+    </div>
+
+    <div id="p2-bands" class="mono" style="margin-top:10px"></div>
+    <input id="phase2_path_confirm" type="text" style="width:100%;margin-top:10px" placeholder="(auto-filled) Phase-2 saved path for Phase 3"/>
+  </div>
+
+  <!-- ===== Phase 3 ===== -->
+  <div class="section">
+    <h2>Phase 3 — Confirmation</h2>
+    <div class="row"><input id="phase2_path" type="text" class="mono" style="flex:1" placeholder="Paste Phase-2 saved path (auto-filled)"/></div>
+    <div class="row" style="margin-top:10px"><textarea id="nwj_json" placeholder='{"LATEST_MM":[[a,b,c,d,e], m], "LATEST_PB":[[...], p], "LATEST_IL_JP":[[...], null], ...}'></textarea></div>
+    <div class="row" style="margin-top:10px"><button id="btnConfirm" class="btn">Confirm vs NWJ</button></div>
+
+    <div class="grid" style="margin-top:12px">
+      <div class="card"><div class="card-title">MM rows that hit</div><table><tbody id="mm-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
+      <div class="card"><div class="card-title">PB rows that hit</div><table><tbody id="pb-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
+      <div class="card"><div class="card-title">IL rows that hit (JP/M1/M2)</div>
+        <table><tbody id="iljp-rows" data-types='["3","4","5","6"]'></tbody></table>
+        <table><tbody id="ilm1-rows" data-types='["3","4","5","6"]'></tbody></table>
+        <table><tbody id="ilm2-rows" data-types='["3","4","5","6"]'></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Recent / CSV ===== -->
+  <div class="section">
+    <h2>Recent & Exports</h2>
+    <div class="row" style="gap:8px">
+      <button id="btnRecent3" class="btn ghost">GET /recent</button>
+      <a class="btn secondary" href="/hist_csv?game=MM">Download MM CSV</a>
+      <a class="btn secondary" href="/hist_csv?game=PB">Download PB CSV</a>
+      <a class="btn secondary" href="/hist_csv?game=IL">Download IL CSV</a>
+    </div>
+    <pre id="recentList" class="card mono" style="margin-top:10px"></pre>
+  </div>
+
+</main>
+<script src="/static/app.js"></script>
 </body>
 </html>
