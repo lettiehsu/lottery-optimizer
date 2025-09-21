@@ -6,7 +6,7 @@
   <title>Lottery Optimizer</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
-    /* Light theme defaults (kept simple to work with your styles.css) */
+    /* Light theme (keeps your existing styles.css, but forces white UI) */
     :root { --card-bg:#fff; --card-border:#e5e7eb; --muted:#6b7280; }
     body { background:#ffffff; color:#111827; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; }
     .container { max-width:1100px; margin:24px auto; padding:0 16px; }
@@ -26,7 +26,7 @@
     .grid-5 { grid-template-columns:repeat(5,minmax(0,1fr)); }
     @media (max-width:960px){ .grid-3,.grid-4,.grid-5{ grid-template-columns:repeat(1,minmax(0,1fr)); } }
     .card { background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; }
-    .card-title { font-weight:700; margin-bottom:8px; }
+    .card-title { font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
     .muted { color:var(--muted); }
     .row { display:flex; gap:10px; align-items:center; }
     .mono { font-family: ui-monospace,SFMono-Regular,Consolas,Monaco,monospace; }
@@ -34,7 +34,6 @@
     .table { width:100%; border-collapse:collapse; }
     .table th, .table td { padding:6px 8px; border-top:1px solid var(--card-border); vertical-align:top; }
     .table.small th, .table.small td { padding:4px 6px; font-size:12px; }
-    .pill { display:inline-block; padding:2px 6px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; }
   </style>
 </head>
 <body>
@@ -138,7 +137,10 @@
           </div>
         </div>
 
-        <div class="muted mono" id="p1-saved" style="margin-top:10px;"></div>
+        <div class="row" style="margin-top:10px;">
+          <div id="p1-saved" class="muted mono" style="flex:1 1 auto;"></div>
+          <button id="btnCopyP1" class="copy" title="Copy saved Phase-1 path">Copy</button>
+        </div>
       </div>
     </section>
 
@@ -153,29 +155,38 @@
       <div id="p2-bands" class="grid grid-3" style="margin-top:12px;"></div>
 
       <div class="grid grid-3" style="margin-top:12px;">
-              <div class="card">
-        <div class="card-title">
-          MM — buy list (10 tickets)
-          <button id="copyMM" class="copy" title="Copy MM buy list">Copy</button>
+        <div class="card">
+          <div class="card-title">
+            MM — buy list (10 tickets)
+            <button id="copyMM" class="copy" title="Copy MM buy list">Copy</button>
+          </div>
+          <table class="table small">
+            <thead><tr><th>#</th><th>Mains</th><th>Bonus</th></tr></thead>
+            <tbody id="mm-buy"></tbody>
+          </table>
         </div>
-        ...
-      </div>
-      
-      <div class="card">
-        <div class="card-title">
-          PB — buy list (10 tickets)
-          <button id="copyPB" class="copy" title="Copy PB buy list">Copy</button>
+        <div class="card">
+          <div class="card-title">
+            PB — buy list (10 tickets)
+            <button id="copyPB" class="copy" title="Copy PB buy list">Copy</button>
+          </div>
+          <table class="table small">
+            <thead><tr><th>#</th><th>Mains</th><th>Bonus</th></tr></thead>
+            <tbody id="pb-buy"></tbody>
+          </table>
         </div>
-        ...
-      </div>
-      
-      <div class="card">
-        <div class="card-title">
-          IL — buy list (15 tickets)
-          <button id="copyIL" class="copy" title="Copy IL buy list">Copy</button>
+        <div class="card">
+          <div class="card-title">
+            IL — buy list (15 tickets)
+            <button id="copyIL" class="copy" title="Copy IL buy list">Copy</button>
+          </div>
+          <table class="table small">
+            <thead><tr><th>#</th><th>Mains</th></tr></thead>
+            <tbody id="il-buy"></tbody>
+          </table>
         </div>
-        ...
       </div>
+
       <!-- Aggregated hits (100×) -->
       <div class="grid grid-3" style="margin-top:12px;">
         <div class="card">
@@ -218,7 +229,10 @@
         </div>
       </div>
 
-      <div class="muted mono" id="p2-saved" style="margin-top:10px;"></div>
+      <div class="row" style="margin-top:10px;">
+        <div id="p2-saved" class="muted mono" style="flex:1 1 auto;"></div>
+        <button id="btnCopyP2" class="copy" title="Copy saved Phase-2 path">Copy</button>
+      </div>
     </section>
 
     <!-- ===================== Phase 3 — Confirmation (five boxes) ===================== -->
