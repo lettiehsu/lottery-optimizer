@@ -2,110 +2,284 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Lottery Optimizer</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
-    :root { color-scheme: light; }
-    body { background:#ffffff; color:#0f172a; max-width:1100px; margin:0 auto; padding:22px; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    a { color:#1d4ed8; }
-    .section { background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:16px; margin:18px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-    .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid #2563eb; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; }
-    .btn.secondary { background:#0ea5e9; border-color:#0ea5e9; }
-    .btn:disabled { opacity:.6; cursor:not-allowed; }
-    .row { display:flex; flex-wrap:wrap; gap:12px; }
-    .col { flex:1 1 360px; min-width:320px; }
-    label { display:block; font-weight:600; margin:10px 0 6px; color:#0f172a;}
-    input, textarea { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #d1d5db; background:#ffffff; color:#0f172a; }
-    h1 { color:#0f172a; margin:22px 0 12px; }
-    h2 { color:#0f172a; margin:8px 0 16px; font-size:18px; }
-    .muted { color:#64748b; font-size:13px; }
-    .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; margin-top:12px; }
-    .card { background:#ffffff; border:1px solid #e5e7eb; border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-    .card h3 { margin:0 0 6px; color:#0f172a; font-size:16px; }
-    .kv { display:flex; justify-content:space-between; padding:4px 0; font-family:ui-monospace,Menlo,Consolas,monospace; color:#0f172a;}
-    .mono { font-family:ui-monospace, Menlo, Consolas, monospace; }
-    table.tbl { width:100%; border-collapse:collapse; font-family:ui-monospace, Menlo, Consolas, monospace; }
-    .tbl th, .tbl td { border-bottom:1px dashed #e5e7eb; padding:6px 8px; text-align:left; color:#0f172a;}
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; border:1px solid #c7d2fe; margin:2px 2px 0 0; color:#1e3a8a; }
-    .okline { margin:8px 0; color:#065f46; }
-    .copy { margin-left:8px; font-size:12px; background:#f3f4f6; border:1px solid #d1d5db; color:#111827; padding:4px 8px; border-radius:8px; cursor:pointer; }
-    ul.hitlist { margin:6px 0 0 18px; padding:0; }
-    ul.hitlist li { margin:2px 0; font-family:ui-monospace, Menlo, Consolas, monospace; }
+    /* Light theme defaults (kept simple to work with your styles.css) */
+    :root { --card-bg:#fff; --card-border:#e5e7eb; --muted:#6b7280; }
+    body { background:#ffffff; color:#111827; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; }
+    .container { max-width:1100px; margin:24px auto; padding:0 16px; }
+    h1 { font-size:28px; margin:0 0 4px; }
+    .sub { color:var(--muted); margin:0 0 20px; }
+    .section { margin:28px 0; }
+    .label { display:block; font-weight:600; margin:14px 0 6px; }
+    .input, .textarea { width:100%; border:1px solid var(--card-border); border-radius:8px; padding:10px 12px; }
+    .textarea { min-height:120px; font-family: ui-monospace,SFMono-Regular,Consolas,Monaco,monospace; }
+    .btn { display:inline-block; border:1px solid #2563eb; background:#2563eb; color:#fff; padding:10px 14px; border-radius:8px; cursor:pointer; }
+    .btn.secondary { background:#fff; color:#2563eb; }
+    .btn:disabled { opacity:.6; cursor:default; }
+    .grid { display:grid; gap:14px; }
+    .grid-2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .grid-3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .grid-4 { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .grid-5 { grid-template-columns:repeat(5,minmax(0,1fr)); }
+    @media (max-width:960px){ .grid-3,.grid-4,.grid-5{ grid-template-columns:repeat(1,minmax(0,1fr)); } }
+    .card { background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:14px; }
+    .card-title { font-weight:700; margin-bottom:8px; }
+    .muted { color:var(--muted); }
+    .row { display:flex; gap:10px; align-items:center; }
+    .mono { font-family: ui-monospace,SFMono-Regular,Consolas,Monaco,monospace; }
+    .copy { border:1px solid var(--card-border); padding:6px 10px; border-radius:8px; background:#f9fafb; font-size:12px; cursor:pointer; }
+    .table { width:100%; border-collapse:collapse; }
+    .table th, .table td { padding:6px 8px; border-top:1px solid var(--card-border); vertical-align:top; }
+    .table.small th, .table.small td { padding:4px 6px; font-size:12px; }
+    .pill { display:inline-block; padding:2px 6px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; }
   </style>
 </head>
 <body>
-  <h1>Lottery Optimizer</h1>
-  <div class="muted">Phase 1 evaluates vs the new jackpot (NJ). Phase 2 runs 100×50 batches to build buy lists. Phase 3 confirms buy lists vs the newest winning jackpot (NWJ).</div>
+  <div class="container">
+    <h1>Lottery Optimizer</h1>
+    <p class="sub">Phase 1 evaluates vs NJ (new jackpot). Phase 2 runs N×50 batches to build buy lists. Phase 3 confirms buy lists vs the newest winning jackpot (NWJ).</p>
 
-  <div class="section">
-    <h2>Phase 1 — Evaluation</h2>
-    <div class="row">
-      <div class="col">
-        <label>MM latest (main,mb) — e.g. <span class="mono">[10,14,34,40,43], 5</span></label>
-        <input id="p1_mm" placeholder="[10,14,34,40,43], 5" />
-        <label>PB latest (main,pb)</label>
-        <input id="p1_pb" placeholder="[14,15,32,42,49], 1" />
-        <label>IL JP latest (6 mains)</label>
-        <input id="p1_il_jp" placeholder="[1,4,5,10,18,49]" />
-        <label>IL M1 latest (6 mains)</label>
-        <input id="p1_il_m1" placeholder="[6,8,10,18,26,27]" />
-        <label>IL M2 latest (6 mains)</label>
-        <input id="p1_il_m2" placeholder="[2,18,21,27,43,50]" />
+    <!-- ===================== Phase 1 — Evaluation ===================== -->
+    <section class="section" id="phase1">
+      <h2>Phase 1 — Evaluation</h2>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-title">Latest jackpots (NJ)</div>
+          <label class="label">MM latest (main,mb) — e.g. <span class="mono">[10,14,34,40,43], 5</span></label>
+          <input id="LATEST_MM" class="input mono" placeholder="[10,14,34,40,43], 5">
+          <label class="label">PB latest (main,pb)</label>
+          <input id="LATEST_PB" class="input mono" placeholder="[14,15,32,42,49], 1">
+          <label class="label">IL JP latest (6 mains)</label>
+          <input id="LATEST_IL_JP" class="input mono" placeholder="[1,4,5,10,18,49]">
+          <label class="label">IL M1 latest (6 mains)</label>
+          <input id="LATEST_IL_M1" class="input mono" placeholder="[6,8,10,18,26,27]">
+          <label class="label">IL M2 latest (6 mains)</label>
+          <input id="LATEST_IL_M2" class="input mono" placeholder="[2,18,21,27,43,50]">
+        </div>
+
+        <div class="card">
+          <div class="card-title">Feeds (Lottery Defeated)</div>
+          <label class="label">FEED_MM (paste the 8 hot/overdue + 3 MB hot/overdue)</label>
+          <textarea id="FEED_MM" class="textarea" placeholder="Top 8 hot numbers: ..."></textarea>
+          <label class="label">FEED_PB</label>
+          <textarea id="FEED_PB" class="textarea" placeholder="Top 8 hot numbers: ..."></textarea>
+          <label class="label">FEED_IL</label>
+          <textarea id="FEED_IL" class="textarea" placeholder="Top 8 hot numbers: ..."></textarea>
+        </div>
       </div>
 
-      <div class="col">
-        <label>FEED_MM</label>
-        <textarea id="p1_feed_mm" rows="7" placeholder="Top 8 hot numbers: ..."></textarea>
-        <label>FEED_PB</label>
-        <textarea id="p1_feed_pb" rows="7" placeholder="Top 8 hot numbers: ..."></textarea>
-        <label>FEED_IL</label>
-        <textarea id="p1_feed_il" rows="4" placeholder="Top 8 hot numbers: ..."></textarea>
+      <div class="grid grid-3">
+        <div class="card">
+          <div class="card-title">HIST_MM_BLOB</div>
+          <textarea id="HIST_MM_BLOB" class="textarea mono" placeholder="17-18-21-42-64 07&#10;..."></textarea>
+        </div>
+        <div class="card">
+          <div class="card-title">HIST_PB_BLOB</div>
+          <textarea id="HIST_PB_BLOB" class="textarea mono" placeholder="28-37-42-50-53 19&#10;..."></textarea>
+        </div>
+        <div class="card">
+          <div class="card-title">HIST_IL_BLOB</div>
+          <textarea id="HIST_IL_BLOB" class="textarea mono" placeholder="05-06-14-15-48-49&#10;..."></textarea>
+        </div>
       </div>
 
-      <div class="col">
-        <label>HIST_MM_BLOB</label>
-        <textarea id="p1_hist_mm" rows="10" placeholder="17-18-21-42-64 07&#10;..."></textarea>
-        <label>HIST_PB_BLOB</label>
-        <textarea id="p1_hist_pb" rows="10" placeholder="28-37-42-50-53 19&#10;..."></textarea>
-        <label>HIST_IL_BLOB</label>
-        <textarea id="p1_hist_il" rows="10" placeholder="05-06-14-15-48-49&#10;..."></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnRun1" class="btn">Run Phase 1</button>
+        <button id="btnRecent" class="btn secondary">GET /recent</button>
       </div>
-    </div>
-    <div style="margin-top:14px;">
-      <button class="btn" id="btn_p1">Run Phase 1</button>
-      <button class="btn secondary" id="btn_recent">GET /recent</button>
-    </div>
-    <div id="out_p1" style="margin-top:14px;"></div>
+
+      <!-- Results -->
+      <div id="p1-results" style="margin-top:16px;">
+        <div id="bands" class="grid grid-3"></div>
+
+        <!-- exact hit boxes -->
+        <div class="grid grid-3" style="margin-top:12px;">
+          <div class="card">
+            <div class="card-title">MM — exact hit rows</div>
+            <table class="table small">
+              <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+              <tbody id="mm-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-title">PB — exact hit rows</div>
+            <table class="table small">
+              <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+              <tbody id="pb-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-title">IL JP — exact hit rows</div>
+            <table class="table small">
+              <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+              <tbody id="iljp-exact" data-types='["3","4","5","6"]'></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid grid-2" style="margin-top:12px;">
+          <div class="card">
+            <div class="card-title">IL M1 — exact hit rows</div>
+            <table class="table small">
+              <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+              <tbody id="ilm1-exact" data-types='["3","4","5","6"]'></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-title">IL M2 — exact hit rows</div>
+            <table class="table small">
+              <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+              <tbody id="ilm2-exact" data-types='["3","4","5","6"]'></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="muted mono" id="p1-saved" style="margin-top:10px;"></div>
+      </div>
+    </section>
+
+    <!-- ===================== Phase 2 — Prediction ===================== -->
+    <section class="section" id="phase2">
+      <h2>Phase 2 — Prediction</h2>
+
+      <label class="label">Saved Phase 1 state file</label>
+      <input id="phase1_path" class="input mono" placeholder="/tmp/lotto_phase1_YYYY-MM-DD_HH-MM-SS.json" />
+      <button id="btnRun2" class="btn" style="margin-top:10px;">Run Phase 2 (100×)</button>
+
+      <div id="p2-bands" class="grid grid-3" style="margin-top:12px;"></div>
+
+      <div class="grid grid-3" style="margin-top:12px;">
+        <div class="card">
+          <div class="card-title">MM — buy list (10 tickets)</div>
+          <table class="table small">
+            <thead><tr><th>#</th><th>Mains</th><th>Bonus</th></tr></thead>
+            <tbody id="mm-buy"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">PB — buy list (10 tickets)</div>
+          <table class="table small">
+            <thead><tr><th>#</th><th>Mains</th><th>Bonus</th></tr></thead>
+            <tbody id="pb-buy"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">IL — buy list (15 tickets)</div>
+          <table class="table small">
+            <thead><tr><th>#</th><th>Mains</th></tr></thead>
+            <tbody id="il-buy"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Aggregated hits (100×) -->
+      <div class="grid grid-3" style="margin-top:12px;">
+        <div class="card">
+          <div class="card-title">MM — 100× aggregated hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr></thead>
+            <tbody id="mm-agg"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">PB — 100× aggregated hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr></thead>
+            <tbody id="pb-agg"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">IL JP — 100× aggregated hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr></thead>
+            <tbody id="iljp-agg"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top:12px;">
+        <div class="card">
+          <div class="card-title">IL M1 — 100× aggregated hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr></thead>
+            <tbody id="ilm1-agg"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">IL M2 — 100× aggregated hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr></thead>
+            <tbody id="ilm2-agg"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="muted mono" id="p2-saved" style="margin-top:10px;"></div>
+    </section>
+
+    <!-- ===================== Phase 3 — Confirmation (five boxes) ===================== -->
+    <section class="section" id="phase3">
+      <h2>Phase 3 — Confirmation</h2>
+
+      <label class="label">Saved Phase 2 state file</label>
+      <input id="phase2_path_confirm" class="input mono" placeholder="/tmp/lotto_phase2_YYYY-MM-DD_HH-MM-SS.json" />
+
+      <label class="label">NWJ (same format as Phase 1; include only announced games)</label>
+      <textarea id="nwj_json" class="textarea mono" rows="4" placeholder='{"LATEST_MM": [[10,14,34,40,43], 5]}'></textarea>
+
+      <button id="btnConfirm" class="btn" style="margin-top:12px;">Confirm vs NWJ</button>
+
+      <div id="confirmGrid" class="grid grid-5" style="margin-top:18px;">
+        <div class="card">
+          <div class="card-title">MM — confirmation hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+            <tbody id="mm-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">PB — confirmation hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+            <tbody id="pb-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">IL JP — confirmation hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+            <tbody id="iljp-rows" data-types='["3","4","5","6"]'></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">IL M1 — confirmation hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+            <tbody id="ilm1-rows" data-types='["3","4","5","6"]'></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">IL M2 — confirmation hits</div>
+          <table class="table small">
+            <thead><tr><th>Type</th><th>Positions</th></tr></thead>
+            <tbody id="ilm2-rows" data-types='["3","4","5","6"]'></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== Recent files ===================== -->
+    <section class="section" id="recent">
+      <h2>Recent Files</h2>
+      <button id="btnRecent2" class="btn secondary">GET /recent</button>
+      <div id="recentList" class="card mono" style="margin-top:10px; white-space:pre-wrap;"></div>
+    </section>
   </div>
 
-  <div class="section">
-    <h2>Phase 2 — Prediction</h2>
-    <label>Saved Phase 1 state file</label>
-    <input id="p2_saved" placeholder="/tmp/lotto_phase1_YYYY-MM-DD_HH-MM-SS.json" />
-    <div style="margin-top:12px;">
-      <button class="btn" id="btn_p2">Run Phase 2 (100×)</button>
-    </div>
-    <div id="out_p2" style="margin-top:14px;"></div>
-  </div>
-
-  <div class="section">
-    <h2>Phase 3 — Confirmation</h2>
-    <label>Saved Phase 2 state file</label>
-    <input id="p3_saved" placeholder="/tmp/lotto_phase2_YYYY-MM-DD_HH-MM-SS.json" />
-    <label>NWJ (same format as Phase 1 if changed)</label>
-    <textarea id="p3_nwj" rows="5" class="mono">{ "LATEST_MM": [[10,14,34,40,43], 5], "LATEST_PB": [[14,15,32,42,49], 1], "LATEST_IL_JP": [[1,4,5,10,18,49], null], "LATEST_IL_M1": [[6,8,10,18,26,27], null], "LATEST_IL_M2": [[2,18,21,27,43,50], null] }</textarea>
-    <div style="margin-top:12px;">
-      <button class="btn" id="btn_p3">Confirm vs NWJ</button>
-    </div>
-    <div id="out_p3" style="margin-top:14px;"></div>
-  </div>
-
-  <div class="section">
-    <h2>Recent Files</h2>
-    <div id="out_recent"></div>
-  </div>
-
-  <script src="/static/app.js"></script>
+  <script defer src="/static/app.js"></script>
 </body>
 </html>
