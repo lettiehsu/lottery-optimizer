@@ -39,11 +39,18 @@
     </div>
 
     <!-- PHASE 1 -->
-    <h2>Phase 1 — Evaluation</h2>
-    <div class="row">
-      <div class="card col-6">
-        <h3>The 2nd Newest jackpots — with per-game dates</h3>
-        <div class="muted mono">Format: [[mains…], bonus]; IL bonus is null. Pick the date above numbers.</div>
+    <h2>Bulk import history (CSV)</h2>
+    <div class="card">
+      <form id="csv_form" enctype="multipart/form-data" onsubmit="return false;">
+        <input type="file" id="csv_file" name="file" accept=".csv,text/csv"/>
+        <label class="muted">
+          <input type="checkbox" id="overwrite" checked/> Overwrite existing data
+        </label>
+        <button class="btn" id="btn_import" type="button">Import CSV</button>
+      </form>
+      <div class="muted" id="csv_selected" style="margin-top:6px">—</div>
+      <pre id="import_out" class="mono muted">—</pre>
+   </div>
 
         <label for="mm_date">Mega Millions</label>
         <input id="mm_date" type="date" />
