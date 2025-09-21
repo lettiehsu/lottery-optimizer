@@ -6,6 +6,14 @@ import os, json, random, math
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 
+# lottery_core.py — complete core for Phase 1/2/3
+from __future__ import annotations
+import os, json, random, math
+from datetime import datetime
+from typing import List, Tuple, Optional, Dict, Any
+
+# ---- Phase-2 runs (make stats steadier by increasing this via env var) ----
+N_PHASE2_RUNS = int(os.environ.get("PHASE2_RUNS", "100"))
 # -----------------------------------------------------------------------------
 # CONFIG / ENV
 # -----------------------------------------------------------------------------
@@ -608,6 +616,10 @@ def run_phase2(saved_phase1_path: str) -> dict:
     except Exception as e:
         return {"ok": False, "error": type(e).__name__, "detail": str(e)}
 
+   seed = os.environ.get("PHASE2_SEED")
+if seed:
+    random.seed(int(seed))
+
     # Rebuild state
     state = rebuild_state_from_phase1(p1)
 
@@ -628,7 +640,7 @@ def run_phase2(saved_phase1_path: str) -> dict:
     freq_il: Dict[int,int] = {}
 
     # Run 100 sims
-    for _ in range(100):
+    for _ in range(N_PHASE2_RUNS):
         runs = _generate_batches(state)
 
         # Tally hits (positions)
