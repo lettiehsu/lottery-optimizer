@@ -27,21 +27,31 @@
     setText("upload_selected", `Selected: ${f.name} (${f.size.toLocaleString()} bytes)`);
   });
 
-  on("upload_btn", "click", async () => {
-    const file = $("upload_csv").files?.[0];
-    if (!file) { $("upload_result").textContent = "No file chosen."; return; }
-    $("upload_result").textContent = "Uploading...";
-    const fd = new FormData();
-    fd.append("csv", file);
-    fd.append("overwrite", $("upload_over").checked ? "1" : "0");
+    on("upload_btn", "click", async () => {
+  const file = $("upload_csv").files?.[0];
+  if (!file) { $("upload_result").textContent = "No file chosen."; return; }
+  $("upload_result").textContent = "Uploading...";
+
+  const fd = new FormData();
+  fd.append("csv", file);
+  fd.append("overwrite", $("upload_over").checked ? "1" : "0");
+
+  try {
+    // IMPORTANT: use /store/import_csv (not /import_csv)
+    const r = await fetch("/store/import_csv", { method: "POST", body: fd, credentials: "same-origin" });
+
+    const text = await r.text();            // read as text first
     try {
-      const r = await fetch("/import_csv", { method: "POST", body: fd, credentials: "same-origin" });
-      const j = await r.json();
+      const j = JSON.parse(text);           // then try JSON
       $("upload_result").textContent = JSON.stringify(j, null, 2);
-    } catch (e) {
-      $("upload_result").textContent = `Upload failed: ${e}`;
+    } catch {
+      // If it wasn't JSON, show whatever the server returned (helpful for errors)
+      $("upload_result").textContent = text;
     }
-  });
+  } catch (e) {
+    $("upload_result").textContent = `Upload failed: ${e}`;
+  }
+});
 
   // ---------- Format helpers ----------
   function asLatestTuple(d) {
