@@ -150,16 +150,22 @@ async function doAutofill(which){
   let data; try{ data=await res.json(); }catch{ alert("Autofill fetch failed."); return; }
   if(!data.ok){ alert("Autofill error: "+(data.detail||"unknown")); return; }
 
-  if(which==="p1"){ // 3rd newest → fill Phase 1 LATEST_* boxes
+  if(which==="p1"){ // 3rd newest → fill Phase 1 boxes (MM, PB, IL JP/M1/M2)
     const j=data.phase1_latest||{};
     if(j.LATEST_MM) $("LATEST_MM").value = `[${j.LATEST_MM[0].join(", ")}], ${j.LATEST_MM[1]}`;
     if(j.LATEST_PB) $("LATEST_PB").value = `[${j.LATEST_PB[0].join(", ")}], ${j.LATEST_PB[1]}`;
-    toast("Phase 1 LATEST_* filled (3rd newest).");
-  }else if(which==="p2"){ // 2nd newest → prefill Phase 1 boxes, then you run Phase 1 → Phase 2
+    if(j.LATEST_IL_JP) $("LATEST_IL_JP").value = `[${j.LATEST_IL_JP[0].join(", ")}]`;
+    if(j.LATEST_IL_M1) $("LATEST_IL_M1").value = `[${j.LATEST_IL_M1[0].join(", ")}]`;
+    if(j.LATEST_IL_M2) $("LATEST_IL_M2").value = `[${j.LATEST_IL_M2[0].join(", ")}]`;
+    toast("Phase 1 LATEST_* filled (3rd newest, including IL JP/M1/M2 if available).");
+  }else if(which==="p2"){ // 2nd newest → prefill Phase 1 boxes
     const j=data.phase2_latest||{};
     if(j.LATEST_MM) $("LATEST_MM").value = `[${j.LATEST_MM[0].join(", ")}], ${j.LATEST_MM[1]}`;
     if(j.LATEST_PB) $("LATEST_PB").value = `[${j.LATEST_PB[0].join(", ")}], ${j.LATEST_PB[1]}`;
-    toast("Phase 1 LATEST_* prefilled with 2nd newest. Run Phase 1 next.");
+    if(j.LATEST_IL_JP) $("LATEST_IL_JP").value = `[${j.LATEST_IL_JP[0].join(", ")}]`;
+    if(j.LATEST_IL_M1) $("LATEST_IL_M1").value = `[${j.LATEST_IL_M1[0].join(", ")}]`;
+    if(j.LATEST_IL_M2) $("LATEST_IL_M2").value = `[${j.LATEST_IL_M2[0].join(", ")}]`;
+    toast("Phase 1 LATEST_* prefilled with 2nd newest (including IL if available). Run Phase 1 next.");
   }else if(which==="p3"){ // newest → fill NWJ JSON box
     const j=data.phase3_latest||{}; const nwj={};
     if(j.LATEST_MM) nwj.LATEST_MM=j.LATEST_MM;
@@ -193,7 +199,7 @@ $("btnShowMMBlob")?.addEventListener("click", ()=>showBlob("MM"));
 $("btnShowPBBlob")?.addEventListener("click", ()=>showBlob("PB"));
 $("btnShowILBlob")?.addEventListener("click", ()=>showBlob("IL"));
 
-// New autofill buttons
+// Autofill buttons
 $("btnAutoP1")?.addEventListener("click", ()=>doAutofill("p1"));
 $("btnAutoP2")?.addEventListener("click", ()=>doAutofill("p2"));
 $("btnAutoP3")?.addEventListener("click", ()=>doAutofill("p3"));
