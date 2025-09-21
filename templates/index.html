@@ -1,244 +1,263 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Lottery Optimizer</title>
-  <link rel="stylesheet" href="/static/styles.css"/>
   <style>
-    :root{--bg:#ffffff;--fg:#111;--muted:#666;--card:#f7f7f8;--accent:#0d6efd}
-    body{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;margin:0}
-    header{padding:16px 20px;border-bottom:1px solid #eee}
-    h1{margin:0;font-size:20px}
-    main{max-width:1100px;margin:0 auto;padding:16px}
-    .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
-    .col{flex:1 1 320px;min-width:300px}
-    textarea, input[type="text"], input[type="file"]{width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:8px;padding:10px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
-    textarea{min-height:120px}
-    .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 14px;cursor:pointer}
-    .btn.secondary{background:#444}
-    .btn.ghost{background:#e9ecef;color:#111}
-    .btn.small{padding:6px 10px;border-radius:8px;font-size:12px}
-    .card{background:var(--card);border:1px solid #eee;border-radius:12px;padding:12px}
-    .card-title{font-weight:600;margin-bottom:6px}
+    :root { --bg:#fff; --fg:#0b0d12; --muted:#6b7280; --card:#f8fafc; --line:#e5e7eb; --accent:#2563eb; }
+    html,body{background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0}
+    .wrap{max-width:1200px;margin:0 auto;padding:24px}
+    h1{margin:0 0 8px 0}
+    h2{margin:24px 0 8px 0}
+    .row{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+    .col-12{grid-column:span 12}.col-6{grid-column:span 6}.col-4{grid-column:span 4}.col-3{grid-column:span 3}
+    label{display:block;font-weight:600;margin:6px 0 4px}
+    input[type=text], textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
+    textarea{min-height:84px;resize:vertical}
+    .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
+    .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .btn.small{padding:4px 8px;font-size:12px}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}
     .muted{color:var(--muted);font-size:12px}
-    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
-    table{width:100%;border-collapse:collapse}
-    th, td{border-top:1px solid #e9e9e9;padding:6px 8px;text-align:left;font-size:13px}
-    th{background:#f2f2f3}
-    .section{margin:16px 0 22px}
-    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-    @media (max-width:900px){.grid{grid-template-columns:1fr}}
-    .copy-wrap{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .path{font-size:12px;color:#333;word-break:break-all}
-    #blobView{white-space:pre;display:none}
-    pre.card{white-space:pre-wrap}
+    pre{white-space:pre-wrap;word-break:break-word}
+    .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   </style>
 </head>
 <body>
-<header>
-  <h1>Lottery Optimizer</h1>
-</header>
-<main>
+  <div class="wrap">
+    <h1>Lottery Optimizer</h1>
+    <div class="muted">Phase 1 evaluates vs NJ (3rd newest), Phase 2 runs 100× to create buy lists, Phase 3 confirms vs NWJ (newest).</div>
 
-  <!-- ===== Phase 1 ===== -->
-  <div class="section">
+    <!-- Phase 1 -->
     <h2>Phase 1 — Evaluation</h2>
-
-    <!-- Autofill buttons -->
-    <div class="row" style="gap:8px;margin:6px 0 10px;">
-      <button id="btnAutoP1" class="btn ghost" title="3rd newest jackpots → Phase 1 boxes">Autofill Phase 1 (3rd newest)</button>
-      <button id="btnAutoP2" class="btn ghost" title="2nd newest jackpots → Phase 1 boxes">Autofill Phase 2 (2nd newest)</button>
-      <button id="btnAutoP3" class="btn secondary" title="Newest jackpots → Phase 3 NWJ">Autofill Phase 3 (NWJ)</button>
+    <div class="toolbar">
+      <button id="btn_autofill_p1" class="btn">Autofill Phase 1 (3rd newest)</button>
+      <button id="btn_get_recent" class="btn">GET /recent</button>
     </div>
-
-    <!-- History repo: save and view -->
-    <div class="row" style="gap:8px;margin:6px 0 12px;">
-      <button id="btnSaveToHist" class="btn secondary" title="Save current NJ entries to history">Save current NJ → History</button>
-      <button id="btnShowMMBlob" class="btn ghost">Show MM BLOB</button>
-      <button id="btnShowPBBlob" class="btn ghost">Show PB BLOB</button>
-      <button id="btnShowILBlob" class="btn ghost">Show IL BLOB</button>
-    </div>
-    <div id="blobView" class="card mono"></div>
 
     <div class="row">
-      <div class="col">
-        <div class="card">
-          <div class="card-title">Newest jackpots (NJ) — paste here</div>
-          <div class="muted">Formats:</div>
-          <ul class="muted" style="margin:6px 0 10px 16px">
-            <li>MM/PB: <span class="mono">[10,14,34,40,43], 5</span></li>
-            <li>IL sets: <span class="mono">[1,4,5,10,18,49]</span></li>
-          </ul>
-          <label class="muted">Mega Millions</label>
-          <input id="LATEST_MM" type="text" placeholder="[a,b,c,d,e], m"/>
-          <label class="muted" style="margin-top:10px;display:block">Powerball</label>
-          <input id="LATEST_PB" type="text" placeholder="[a,b,c,d,e], p"/>
-          <label class="muted" style="margin-top:10px;display:block">IL Lotto — Jackpot</label>
-          <input id="LATEST_IL_JP" type="text" placeholder="[a,b,c,d,e,f]"/>
-          <label class="muted" style="margin-top:10px;display:block">IL Lotto — Million 1</label>
-          <input id="LATEST_IL_M1" type="text" placeholder="[a,b,c,d,e,f]"/>
-          <label class="muted" style="margin-top:10px;display:block">IL Lotto — Million 2</label>
-          <input id="LATEST_IL_M2" type="text" placeholder="[a,b,c,d,e,f]"/>
+      <div class="card col-6">
+        <h3>Newest jackpots (NJ) — paste here</h3>
+        <div class="muted mono">Format: [[mains...], bonus] — use <b>null</b> for IL bonus</div>
+        <label for="mm_latest">Mega Millions</label>
+        <input id="mm_latest" type="text" placeholder='e.g. [[10,14,34,40,43], 5]' />
+        <label for="pb_latest">Powerball</label>
+        <input id="pb_latest" type="text" placeholder='e.g. [[7,30,59,64,69], 20]' />
+        <label for="il_jp_latest">IL Lotto — Jackpot (6 mains)</label>
+        <input id="il_jp_latest" type="text" placeholder='e.g. [[1,4,5,10,18,49], null]' />
+        <label for="il_m1_latest">IL Lotto — Million 1 (6 mains)</label>
+        <input id="il_m1_latest" type="text" placeholder='e.g. [[6,8,10,18,26,27], null]' />
+        <label for="il_m2_latest">IL Lotto — Million 2 (6 mains)</label>
+        <input id="il_m2_latest" type="text" placeholder='e.g. [[2,18,21,27,43,50], null]' />
+        <div class="toolbar">
+          <button id="btn_run_p1" class="btn primary">Run Phase 1</button>
+          <button id="btn_copy_p1" class="btn small">Copy saved path</button>
         </div>
+        <div class="muted">Saved Phase-1 path:</div>
+        <input id="p1_saved_path" class="mono" type="text" readonly />
       </div>
 
-      <div class="col">
-        <div class="card">
-          <div class="card-title">Feeds (Lottery Defeated)</div>
-          <label class="muted">MM feed</label>
-          <textarea id="FEED_MM" placeholder='Top 8 hot numbers: ...'></textarea>
-          <label class="muted" style="margin-top:10px;display:block">PB feed</label>
-          <textarea id="FEED_PB" placeholder='Top 8 hot numbers: ...'></textarea>
-          <label class="muted" style="margin-top:10px;display:block">IL feed</label>
-          <textarea id="FEED_IL" placeholder='Top 8 hot numbers: ...'></textarea>
-        </div>
-      </div>
-
-      <div class="col">
-        <div class="card">
-          <div class="card-title">Historical blobs (top-down, newest first)</div>
-          <label class="muted">HIST_MM_BLOB</label>
-          <textarea id="HIST_MM_BLOB" placeholder="05-16-29-44-66 07&#10;..."></textarea>
-          <label class="muted" style="margin-top:10px;display:block">HIST_PB_BLOB</label>
-          <textarea id="HIST_PB_BLOB" placeholder="14-15-32-42-49 01&#10;..."></textarea>
-          <label class="muted" style="margin-top:10px;display:block">HIST_IL_BLOB</label>
-          <textarea id="HIST_IL_BLOB" placeholder="05-06-14-15-48-49&#10;..."></textarea>
+      <div class="card col-6">
+        <h3>Feeds (Lottery Defeated)</h3>
+        <div class="grid-3">
+          <div>
+            <label for="feed_mm">FEED_MM</label>
+            <textarea id="feed_mm" placeholder="Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Mega Ball numbers: ...&#10;Top 3 overdue Mega Ball numbers: ..."></textarea>
+          </div>
+          <div>
+            <label for="feed_pb">FEED_PB</label>
+            <textarea id="feed_pb" placeholder="Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Power Ball numbers: ...&#10;Top 3 overdue Power Ball numbers: ..."></textarea>
+          </div>
+          <div>
+            <label for="feed_il">FEED_IL</label>
+            <textarea id="feed_il" placeholder="Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ..."></textarea>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="row" style="margin-top:10px">
-      <button id="btnRun1" class="btn">Run Phase 1</button>
-      <button id="btnRecent" class="btn ghost">GET /recent</button>
-    </div>
-
-    <div class="row" style="margin-top:10px">
-      <div class="copy-wrap">
-        <div id="p1-saved" class="path mono"></div>
-        <button id="btnCopyP1" class="btn small ghost">Copy</button>
+    <div class="row" style="margin-top:8px">
+      <div class="card col-12">
+        <div id="p1_results"><span class="muted">Phase-1 results will appear here.</span></div>
       </div>
     </div>
 
-    <div class="grid" style="margin-top:12px">
-      <div class="card"><div class="card-title">MM exact rows vs NJ</div><table><tbody id="mm-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
-      <div class="card"><div class="card-title">PB exact rows vs NJ</div><table><tbody id="pb-exact" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
-      <div class="card"><div class="card-title">IL exact rows vs NJ</div>
-        <table><tbody id="iljp-exact" data-types='["3","4","5","6"]'></tbody></table>
-        <table><tbody id="ilm1-exact" data-types='["3","4","5","6"]'></tbody></table>
-        <table><tbody id="ilm2-exact" data-types='["3","4","5","6"]'></tbody></table>
-      </div>
-    </div>
-
-    <div class="grid" style="margin-top:12px">
-      <div class="card"><div class="card-title">Bands — IL</div><div id="bands" class="mono"></div></div>
-      <div class="card"><div class="card-title">Bands — MM</div><div class="mono" id="bands_mm"></div></div>
-      <div class="card"><div class="card-title">Bands — PB</div><div class="mono" id="bands_pb"></div></div>
-    </div>
-
-    <input id="phase1_path" type="text" style="width:100%;margin-top:10px" placeholder="(auto-filled) Phase-1 saved path for Phase 2"/>
-  </div>
-
-  <!-- ===== Phase 2 ===== -->
-  <div class="section">
+    <!-- Phase 2 -->
     <h2>Phase 2 — Prediction (100× runs)</h2>
-    <div class="row">
-      <input id="phase1_path_input" type="text" class="mono" style="flex:1" placeholder="Paste Phase-1 saved path (auto-filled)"/>
-      <button id="btnRun2" class="btn">Run Phase 2</button>
-      <button id="btnRecent2" class="btn ghost">GET /recent</button>
-    </div>
-
-    <div class="row" style="margin-top:10px">
-      <div class="copy-wrap">
-        <div id="p2-saved" class="path mono"></div>
-        <button id="btnCopyP2" class="btn small ghost">Copy</button>
-      </div>
-    </div>
-
-    <div class="grid" style="margin-top:12px">
-      <div class="card">
-        <div class="card-title">MM buy list (10)</div>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button id="copyMM" class="btn small ghost">Copy list</button></div>
-        <table><thead><tr><th>#</th><th>Mains</th><th>MB</th></tr></thead><tbody id="mm-buy"></tbody></table>
-      </div>
-      <div class="card">
-        <div class="card-title">PB buy list (10)</div>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button id="copyPB" class="btn small ghost">Copy list</button></div>
-        <table><thead><tr><th>#</th><th>Mains</th><th>PB</th></tr></thead><tbody id="pb-buy"></tbody></table>
-      </div>
-      <div class="card">
-        <div class="card-title">IL buy list (15)</div>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button id="copyIL" class="btn small ghost">Copy list</button></div>
-        <table><thead><tr><th>#</th><th>Mains</th></tr></thead><tbody id="il-buy"></tbody></table>
-      </div>
-    </div>
-
-    <div class="grid" style="margin-top:12px">
-      <div class="card"><div class="card-title">MM aggregated hits</div><table><thead><tr><th>Type</th><th>Count</th><th>Top positions</th></tr></thead><tbody id="mm-agg"></tbody></table></div>
-      <div class="card"><div class="card-title">PB aggregated hits</div><table><thead><tr><th>Type</th><th>Count</th><th>Top positions</th></tr></thead><tbody id="pb-agg"></tbody></table></div>
-      <div class="card">
-        <div class="card-title">IL aggregated hits</div>
-        <table><thead><tr><th>Type</th><th>Count</th><th>Top positions</th></tr></thead><tbody id="iljp-agg"></tbody></table>
-        <table><tbody id="ilm1-agg"></tbody></table>
-        <table><tbody id="ilm2-agg"></tbody></table>
-      </div>
-    </div>
-
-    <div id="p2-bands" class="mono" style="margin-top:10px"></div>
-    <input id="phase2_path_confirm" type="text" style="width:100%;margin-top:10px" placeholder="(auto-filled) Phase-2 saved path for Phase 3"/>
-  </div>
-
-  <!-- ===== Phase 3 ===== -->
-  <div class="section">
-    <h2>Phase 3 — Confirmation</h2>
-    <div class="row"><input id="phase2_path" type="text" class="mono" style="flex:1" placeholder="Paste Phase-2 saved path (auto-filled)"/></div>
-    <div class="row" style="margin-top:10px"><textarea id="nwj_json" placeholder='{"LATEST_MM":[[a,b,c,d,e], m], "LATEST_PB":[[...], p], "LATEST_IL_JP":[[...], null], ...}'></textarea></div>
-    <div class="row" style="margin-top:10px"><button id="btnConfirm" class="btn">Confirm vs NWJ</button></div>
-
-    <div class="grid" style="margin-top:12px">
-      <div class="card"><div class="card-title">MM rows that hit</div><table><tbody id="mm-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
-      <div class="card"><div class="card-title">PB rows that hit</div><table><tbody id="pb-rows" data-types='["3","3B","4","4B","5","5B"]'></tbody></table></div>
-      <div class="card"><div class="card-title">IL rows that hit (JP/M1/M2)</div>
-        <table><tbody id="iljp-rows" data-types='["3","4","5","6"]'></tbody></table>
-        <table><tbody id="ilm1-rows" data-types='["3","4","5","6"]'></tbody></table>
-        <table><tbody id="ilm2-rows" data-types='["3","4","5","6"]'></tbody></table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== Recent / CSV ===== -->
-  <div class="section">
-    <h2>Recent & Exports</h2>
-    <div class="row" style="gap:8px">
-      <button id="btnRecent3" class="btn ghost">GET /recent</button>
-      <a class="btn secondary" href="/hist_csv?game=MM">Download MM CSV</a>
-      <a class="btn secondary" href="/hist_csv?game=PB">Download PB CSV</a>
-      <a class="btn secondary" href="/hist_csv?game=IL">Download IL CSV</a>
-    </div>
-    <pre id="recentList" class="card mono" style="margin-top:10px"></pre>
-  </div>
-
-  <!-- ===== Bulk import history (CSV) ===== -->
-  <div class="section">
-    <h2>Bulk import history (CSV)</h2>
     <div class="card">
-      <p class="muted" style="margin:0 0 8px">
-        Upload 1–3 years of jackpots to build your local history. Supported schemas:
-      </p>
-      <ul class="muted" style="margin:0 0 10px 16px">
-        <li><b>Combined:</b> <span class="mono">game,draw_date,tier,n1,n2,n3,n4,n5,n6,bonus</span> (game = MM|PB|IL)</li>
-        <li><b>Per-game:</b> MM/PB: <span class="mono">draw_date,n1,n2,n3,n4,n5,bonus</span></li>
-        <li><b>Per-game IL:</b> <span class="mono">draw_date,tier,n1,n2,n3,n4,n5,n6</span> (tier = JP|M1|M2)</li>
-      </ul>
-      <input id="csvFile" type="file" accept=".csv"/>
-      <div class="row" style="margin-top:8px">
-        <button id="btnImport" class="btn">Import CSV</button>
+      <div class="toolbar">
+        <label class="muted">Saved Phase-1 state file →</label>
+        <input id="p2_input_path" class="mono" type="text" style="flex:1" placeholder="/tmp/lotto_phase1_YYYY-MM-DD_HH-MM-SS.json" />
+        <button id="btn_run_p2" class="btn primary">Run Phase 2 (100×)</button>
+        <button id="btn_recent" class="btn">GET /recent</button>
       </div>
-      <pre id="importResult" class="card mono" style="margin-top:10px"></pre>
+      <div class="row">
+        <div class="card col-4">
+          <h3>MM buy list (10)</h3>
+          <pre id="mm_buy" class="mono muted">—</pre>
+          <button id="btn_copy_mm" class="btn small">Copy list</button>
+        </div>
+        <div class="card col-4">
+          <h3>PB buy list (10)</h3>
+          <pre id="pb_buy" class="mono muted">—</pre>
+          <button id="btn_copy_pb" class="btn small">Copy list</button>
+        </div>
+        <div class="card col-4">
+          <h3>IL buy list (15)</h3>
+          <pre id="il_buy" class="mono muted">—</pre>
+          <button id="btn_copy_il" class="btn small">Copy list</button>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:8px">Saved Phase-2 path:</div>
+      <input id="p2_saved_path" class="mono" type="text" readonly />
+      <div class="row" style="margin-top:8px">
+        <div class="card col-4"><h3>MM aggregated hits</h3><pre id="mm_agg" class="mono muted">—</pre></div>
+        <div class="card col-4"><h3>PB aggregated hits</h3><pre id="pb_agg" class="mono muted">—</pre></div>
+        <div class="card col-4"><h3>IL aggregated hits</h3><pre id="il_agg" class="mono muted">—</pre></div>
+      </div>
     </div>
+
+    <!-- Phase 3 -->
+    <h2>Phase 3 — Confirmation</h2>
+    <div class="toolbar">
+      <button id="btn_autofill_p3" class="btn">Autofill Phase 3 (NWJ)</button>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <label class="muted">Saved Phase-2 state file →</label>
+        <input id="p3_input_path" class="mono" type="text" style="flex:1" placeholder="/tmp/lotto_phase2_YYYY-MM-DD_HH-MM-SS.json" />
+      </div>
+      <label for="nwj_json">NWJ (same JSON format as Phase 1 LATEST_*; include only games announced)</label>
+      <textarea id="nwj_json" class="mono" placeholder='{"LATEST_MM":[[10,14,34,40,43],5],"LATEST_PB":[[14,15,32,42,49],1],"LATEST_IL_JP":[[1,4,5,10,18,49],null],"LATEST_IL_M1":[[6,8,10,18,26,27],null],"LATEST_IL_M2":[[2,18,21,27,43,50],null]}'></textarea>
+      <div class="toolbar">
+        <button id="btn_run_p3" class="btn primary">Confirm vs NWJ</button>
+      </div>
+      <div class="row">
+        <div class="card col-4"><h3>MM rows that hit</h3><pre id="mm_c_hits" class="mono muted">—</pre></div>
+        <div class="card col-4"><h3>PB rows that hit</h3><pre id="pb_c_hits" class="mono muted">—</pre></div>
+        <div class="card col-4"><h3>IL rows that hit (JP/M1/M2)</h3><pre id="il_c_hits" class="mono muted">—</pre></div>
+      </div>
+    </div>
+
+    <!-- Recent & Exports -->
+    <h2>Recent &amp; Exports</h2>
+    <div class="toolbar">
+      <button id="btn_recent_bottom" class="btn">GET /recent</button>
+      <a class="btn" href="/download/mm_csv" target="_blank">Download MM CSV</a>
+      <a class="btn" href="/download/pb_csv" target="_blank">Download PB CSV</a>
+      <a class="btn" href="/download/il_csv" target="_blank">Download IL CSV</a>
+    </div>
+    <pre id="recent_out" class="mono muted card">—</pre>
   </div>
 
-</main>
-<script src="/static/app.js"></script>
+  <!-- Inline helpers for run/copy; Autofill lives in app.js -->
+  <script>
+    async function postJSON(url, payload) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    }
+    function copyText(elId){ const el=document.getElementById(elId); if(el && el.value){ navigator.clipboard.writeText(el.value); } }
+
+    // Phase 1
+    document.getElementById("btn_run_p1").addEventListener("click", async ()=>{
+      try{
+        const body = {
+          LATEST_MM: eval(document.getElementById("mm_latest").value||"null"),
+          LATEST_PB: eval(document.getElementById("pb_latest").value||"null"),
+          LATEST_IL_JP: eval(document.getElementById("il_jp_latest").value||"null"),
+          LATEST_IL_M1: eval(document.getElementById("il_m1_latest").value||"null"),
+          LATEST_IL_M2: eval(document.getElementById("il_m2_latest").value||"null"),
+          FEED_MM: document.getElementById("feed_mm").value||"",
+          FEED_PB: document.getElementById("feed_pb").value||"",
+          FEED_IL: document.getElementById("feed_il").value||""
+        };
+        const out = await postJSON("/run_json", body);
+        document.getElementById("p1_results").textContent = JSON.stringify(out, null, 2);
+        if(out.saved_path){ document.getElementById("p1_saved_path").value = out.saved_path; document.getElementById("p2_input_path").value = out.saved_path; }
+      }catch(e){ alert("Phase 1 failed: "+e.message); }
+    });
+    document.getElementById("btn_copy_p1").addEventListener("click", ()=>copyText("p1_saved_path"));
+
+    // Phase 2
+    document.getElementById("btn_run_p2").addEventListener("click", async ()=>{
+      try{
+        const p1 = document.getElementById("p2_input_path").value.trim();
+        const out = await postJSON("/phase2_json", { saved_phase1_path: p1 });
+        document.getElementById("p2_saved_path").value = out.saved_path || "";
+        // buy lists
+        document.getElementById("mm_buy").textContent = (out.buy_lists?.MM||[]).map((t,i)=>`${i+1}. ${t.mains.join(", ")}  MB ${t.bonus??"-"}`).join("\n") || "—";
+        document.getElementById("pb_buy").textContent = (out.buy_lists?.PB||[]).map((t,i)=>`${i+1}. ${t.mains.join(", ")}  PB ${t.bonus??"-"}`).join("\n") || "—";
+        document.getElementById("il_buy").textContent = (out.buy_lists?.IL||[]).map((t,i)=>`${i+1}. ${t.mains.join(", ")}`).join("\n") || "—";
+        // aggs
+        const fmtAgg = (agg)=>Object.entries(agg||{}).map(([k,v])=>{
+          const pos=(v||[]).map(p=>`${p[0]}(${p[1]})`).join(", ");
+          const cnt=(v||[]).reduce((a,b)=>a+b[1],0);
+          return `${k}\t${cnt}\t${pos||"—"}`;
+        }).join("\n") || "—";
+        document.getElementById("mm_agg").textContent = fmtAgg(out.agg_hits?.MM);
+        document.getElementById("pb_agg").textContent = fmtAgg(out.agg_hits?.PB);
+        document.getElementById("il_agg").textContent = fmtAgg(out.agg_hits?.IL);
+        if(out.saved_path) document.getElementById("p3_input_path").value = out.saved_path;
+      }catch(e){ alert("Phase 2 failed: "+e.message); }
+    });
+
+    // Copy buy lists
+    document.getElementById("btn_copy_mm").addEventListener("click", ()=>{
+      navigator.clipboard.writeText(document.getElementById("mm_buy").textContent.trim());
+    });
+    document.getElementById("btn_copy_pb").addEventListener("click", ()=>{
+      navigator.clipboard.writeText(document.getElementById("pb_buy").textContent.trim());
+    });
+    document.getElementById("btn_copy_il").addEventListener("click", ()=>{
+      navigator.clipboard.writeText(document.getElementById("il_buy").textContent.trim());
+    });
+
+    // Phase 3
+    document.getElementById("btn_run_p3").addEventListener("click", async ()=>{
+      try{
+        const p2 = document.getElementById("p3_input_path").value.trim();
+        const nwj = JSON.parse(document.getElementById("nwj_json").value||"{}");
+        const out = await postJSON("/confirm_json", { saved_path: p2, ...nwj });
+        const fmtHits=(obj)=>Object.entries(obj||{}).map(([k,v])=>{
+          const pos = (v||[]).join(", ");
+          return `${k}\t${pos||"—"}`;
+        }).join("\n") || "—";
+        document.getElementById("mm_c_hits").textContent = fmtHits(out.MM||{});
+        document.getElementById("pb_c_hits").textContent = fmtHits(out.PB||{});
+        // IL packs JP/M1/M2 detail inside; show compact
+        const ilLines=[];
+        if(out.IL){
+          for(const k of ["JP","M1","M2"]){
+            const block = out.IL[k]||{};
+            const row = Object.entries(block).map(([t,arr])=>`${k} ${t}: ${(arr||[]).join(", ")||"—"}`).join("\n");
+            if(row) ilLines.push(row);
+          }
+        }
+        document.getElementById("il_c_hits").textContent = ilLines.join("\n") || "—";
+      }catch(e){ alert("Confirm failed: "+e.message); }
+    });
+
+    // Recent list
+    async function loadRecent(){
+      try{
+        const r = await fetch("/recent",{cache:"no-store"});
+        document.getElementById("recent_out").textContent = await r.text();
+      }catch(e){ alert("GET /recent failed: "+e.message); }
+    }
+    document.getElementById("btn_recent").addEventListener("click", loadRecent);
+    document.getElementById("btn_recent_bottom").addEventListener("click", loadRecent);
+    document.getElementById("btn_get_recent").addEventListener("click", loadRecent);
+  </script>
+
+  <!-- Your autofill logic (cache-busted) -->
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>
