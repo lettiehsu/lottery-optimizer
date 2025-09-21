@@ -6,12 +6,12 @@
   <title>Lottery Optimizer</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
-    /* light, tidy defaults (works with your existing styles.css) */
     :root { --bg:#fff; --fg:#111; --muted:#666; --line:#e6e6e6; --card:#fafafa; --blue:#2563eb; }
     body { background:var(--bg); color:var(--fg); margin:0; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     .wrap { max-width:1150px; margin:24px auto 64px; padding:0 16px; }
     h1 { margin:0 0 16px; }
     h2 { margin:28px 0 12px; }
+    h3 { margin:0 0 10px; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
     .card + .card { margin-top:16px; }
     .row { display:flex; gap:10px; align-items:center; }
@@ -20,18 +20,17 @@
     .phase1-grid { display:grid; gap:16px; grid-template-columns: 1.05fr 1fr; }
     .feeds-grid { display:grid; gap:10px; grid-template-columns: 1fr 1fr 1fr; }
     .hist-grid { display:grid; gap:16px; grid-template-columns: 1fr 1fr 1fr; }
-    .field-label { display:block; margin:10px 0 4px; font-weight:600; }
+    .field-label { display:block; margin:12px 0 6px; font-weight:600; }
     .hint { color:var(--muted); font-size:12px; }
     .tiny { color:var(--muted); font-size:12px; margin-top:6px; }
-    input.text, input.date, textarea, input[type="file"] { width:100%; box-sizing:border-box; }
-    input.text, input.date, textarea { border:1px solid var(--line); background:#fff; border-radius:8px; padding:9px 10px; }
-    input.date { padding:8px 10px; }
-    textarea { min-height:130px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    input.date, textarea, input[type="file"] { width:100%; box-sizing:border-box; }
+    input.date, textarea { border:1px solid var(--line); background:#fff; border-radius:8px; padding:8px 10px; }
+    textarea { min-height:130px; }
     .btn { background:var(--blue); color:#fff; border:none; padding:9px 12px; border-radius:8px; cursor:pointer; }
     .btn.ghost { background:#fff; color:var(--fg); border:1px solid var(--line); }
     .btn.sm { padding:6px 9px; font-size:12px; }
-    .gap { gap:8px; }
-    .mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .preview { padding:8px 10px; border:1px dashed var(--line); border-radius:8px; background:#fff; }
   </style>
 </head>
 <body>
@@ -41,13 +40,13 @@
     <!-- Bulk import -->
     <h2>Bulk import history (CSV)</h2>
     <div class="card">
-      <div class="row gap">
+      <div class="row" style="gap:8px;">
         <input id="upload_csv" type="file" accept=".csv,text/csv" />
-        <label class="row gap"><input id="upload_over" type="checkbox" checked /> Overwrite existing data</label>
+        <label class="row" style="gap:6px;"><input id="upload_over" type="checkbox" checked /> Overwrite existing data</label>
         <button id="upload_btn" class="btn">Import CSV</button>
       </div>
-      <pre id="upload_result" class="tiny mono">—</pre>
       <div class="tiny">Selected: <span id="upload_selected">—</span></div>
+      <pre id="upload_result" class="tiny mono">—</pre>
     </div>
 
     <!-- Phase 1 -->
@@ -55,35 +54,45 @@
 
     <div class="phase1-grid">
       <div class="card">
-        <h3 class="card-title">The 2nd Newest jackpots — with per-game dates</h3>
-        <p class="hint">Format: <code>[[mains...], bonus]</code>. IL bonus is <b>null</b>. Pick the date above the numbers.</p>
+        <h3>The 2nd Newest jackpots — with per-game dates</h3>
+        <p class="hint">Pick the date for each game. We’ll fetch the corresponding numbers and show a preview.</p>
 
         <!-- MM -->
         <label class="field-label">Mega Millions</label>
-        <input id="mm_date" type="date" class="date" />
-        <input id="LATEST_MM" type="text" class="text" placeholder="[[10,14,34,40,43], 5]" />
+        <div class="row">
+          <input id="mm_date" type="date" class="date" />
+        </div>
+        <div id="mm_preview" class="preview mono tiny">—</div>
 
         <!-- PB -->
         <label class="field-label">Powerball</label>
-        <input id="pb_date" type="date" class="date" />
-        <input id="LATEST_PB" type="text" class="text" placeholder="[[27,30,59,64,69], 20]" />
+        <div class="row">
+          <input id="pb_date" type="date" class="date" />
+        </div>
+        <div id="pb_preview" class="preview mono tiny">—</div>
 
         <!-- IL JP -->
         <label class="field-label">IL Lotto — Jackpot</label>
-        <input id="il_jp_date" type="date" class="date" />
-        <input id="LATEST_IL_JP" type="text" class="text" placeholder="[[1,4,5,10,18,49], null]" />
+        <div class="row">
+          <input id="il_jp_date" type="date" class="date" />
+        </div>
+        <div id="il_jp_preview" class="preview mono tiny">—</div>
 
         <!-- IL M1 -->
         <label class="field-label">IL Lotto — Million 1</label>
-        <input id="il_m1_date" type="date" class="date" />
-        <input id="LATEST_IL_M1" type="text" class="text" placeholder="[[6,8,10,18,26,27], null]" />
+        <div class="row">
+          <input id="il_m1_date" type="date" class="date" />
+        </div>
+        <div id="il_m1_preview" class="preview mono tiny">—</div>
 
         <!-- IL M2 -->
         <label class="field-label">IL Lotto — Million 2</label>
-        <input id="il_m2_date" type="date" class="date" />
-        <input id="LATEST_IL_M2" type="text" class="text" placeholder="[[2,18,21,27,43,50], null]" />
+        <div class="row">
+          <input id="il_m2_date" type="date" class="date" />
+        </div>
+        <div id="il_m2_preview" class="preview mono tiny">—</div>
 
-        <div class="row gap" style="margin-top:10px;">
+        <div class="row" style="gap:8px; margin-top:10px;">
           <button id="run_p1" class="btn">Run Phase 1</button>
           <button id="copy_p1" class="btn ghost">Copy saved path</button>
           <button id="save_nj_to_hist" class="btn ghost">Save current NJ → History</button>
@@ -93,24 +102,21 @@
 
       <div class="card">
         <div class="row between">
-          <h3 class="card-title">Feeds (Lottery Defeated)</h3>
+          <h3>Feeds (Lottery Defeated)</h3>
           <small class="hint">Paste latest feeds when you run</small>
         </div>
         <div class="feeds-grid">
           <div>
             <label class="field-label">FEED_MM</label>
-            <textarea id="FEED_MM" rows="9" class="mono"
-              placeholder="Top 8 hot numbers: …&#10;Top 8 overdue numbers: …&#10;Top 3 hot Mega Ball numbers: …&#10;Top 3 overdue Mega Ball numbers: …"></textarea>
+            <textarea id="FEED_MM" class="mono" placeholder="Top 8 hot numbers: …&#10;Top 8 overdue numbers: …&#10;Top 3 hot Mega Ball numbers: …&#10;Top 3 overdue Mega Ball numbers: …"></textarea>
           </div>
           <div>
             <label class="field-label">FEED_PB</label>
-            <textarea id="FEED_PB" rows="9" class="mono"
-              placeholder="Top 8 hot numbers: …&#10;Top 8 overdue numbers: …&#10;Top 3 hot Power Ball numbers: …&#10;Top 3 overdue Power Ball numbers: …"></textarea>
+            <textarea id="FEED_PB" class="mono" placeholder="Top 8 hot numbers: …&#10;Top 8 overdue numbers: …&#10;Top 3 hot Power Ball numbers: …&#10;Top 3 overdue Power Ball numbers: …"></textarea>
           </div>
           <div>
             <label class="field-label">FEED_IL</label>
-            <textarea id="FEED_IL" rows="9" class="mono"
-              placeholder="Top 8 hot numbers: …&#10;Top 8 overdue numbers: …"></textarea>
+            <textarea id="FEED_IL" class="mono" placeholder="Top 8 hot numbers: …&#10;Top 8 overdue numbers: …"></textarea>
           </div>
         </div>
       </div>
@@ -121,51 +127,50 @@
       <!-- MM -->
       <div class="card">
         <h3>HIST_MM_BLOB</h3>
-        <div class="row gap">
+        <div class="row">
           <input id="mm_hist_date" type="date" class="date" />
           <button id="mm_hist_load20" class="btn sm">Load 20</button>
         </div>
-        <textarea id="HIST_MM_BLOB" class="mono" placeholder="MM/DD/YYYY  10-14-34-40-43  05&#10;…" ></textarea>
+        <textarea id="HIST_MM_BLOB" class="mono" placeholder="MM/DD/YYYY  10-14-34-40-43  05&#10;…"></textarea>
       </div>
 
       <!-- PB -->
       <div class="card">
         <h3>HIST_PB_BLOB</h3>
-        <div class="row gap">
+        <div class="row">
           <input id="pb_hist_date" type="date" class="date" />
           <button id="pb_hist_load20" class="btn sm">Load 20</button>
         </div>
         <textarea id="HIST_PB_BLOB" class="mono" placeholder="MM/DD/YYYY  28-37-42-50-53  19&#10;…"></textarea>
       </div>
 
-      <!-- IL -->
+      <!-- IL (3 panes) -->
       <div class="card">
         <h3>HIST_IL_BLOB (JP / M1 / M2)</h3>
 
         <label class="field-label">JP</label>
-        <div class="row gap">
+        <div class="row">
           <input id="il_jp_hist_date" type="date" class="date" />
           <button id="il_jp_hist_load20" class="btn sm">Load 20</button>
         </div>
         <textarea id="HIST_IL_JP_BLOB" class="mono" placeholder="MM/DD/YYYY  01-04-05-10-18-49&#10;…"></textarea>
 
         <label class="field-label" style="margin-top:12px;">M1</label>
-        <div class="row gap">
+        <div class="row">
           <input id="il_m1_hist_date" type="date" class="date" />
           <button id="il_m1_hist_load20" class="btn sm">Load 20</button>
         </div>
         <textarea id="HIST_IL_M1_BLOB" class="mono" placeholder="MM/DD/YYYY  06-08-10-18-26-27&#10;…"></textarea>
 
         <label class="field-label" style="margin-top:12px;">M2</label>
-        <div class="row gap">
+        <div class="row">
           <input id="il_m2_hist_date" type="date" class="date" />
           <button id="il_m2_hist_load20" class="btn sm">Load 20</button>
         </div>
         <textarea id="HIST_IL_M2_BLOB" class="mono" placeholder="MM/DD/YYYY  02-18-21-27-43-50&#10;…"></textarea>
       </div>
     </div>
-
-  </div><!-- /wrap -->
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
