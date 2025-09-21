@@ -1,8 +1,8 @@
 /* static/app.js — light theme UI with:
    - Phase 1: bands, summary hits, exact hit rows (above), 50-row tables (below)
-   - Phase 2: buy list tables + aggregated 100× hit stats (robust to array/map/number)
+   - Phase 2: buy lists + aggregated 100× hit stats (robust to array/map/number and multiple keys)
    - Phase 3: confirmation hits vs NWJ
-   - Recent saved files list
+   - Recent files
 */
 
 /* ------------------ helpers ------------------ */
@@ -16,18 +16,9 @@ async function postJSON(url, data) {
   try { return JSON.parse(txt); } catch { return { ok:false, raw: txt }; }
 }
 
-function el(tag, cls, html) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (html !== undefined) n.innerHTML = html;
-  return n;
-}
+function el(tag, cls, html) { const n = document.createElement(tag); if (cls) n.className = cls; if (html!==undefined) n.innerHTML = html; return n; }
 function pill(x){ return `<span class="pill">${x}</span>`; }
-function copyBtn(text) {
-  const b = el("button", "copy", "Copy");
-  b.onclick = () => { navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(()=>b.textContent="Copy",1200); };
-  return b;
-}
+function copyBtn(text){ const b=el("button","copy","Copy"); b.onclick=()=>{navigator.clipboard.writeText(text); b.textContent="Copied"; setTimeout(()=>b.textContent="Copy",1200)}; return b; }
 
 /* ------------------ renderers ------------------ */
 function renderBands(bands) {
@@ -42,8 +33,7 @@ function renderBands(bands) {
 }
 
 function renderHitPositions(title, hitsObj, withBonus=false) {
-  const c = el("div","card");
-  c.append(el("h3","",title));
+  const c = el("div","card"); c.append(el("h3","",title));
   const cols = withBonus ? ["3","3B","4","4B","5","5B"] : ["3","4","5","6"];
   const tbl = el("table","tbl");
   const thead = el("thead"); thead.innerHTML = `<tr><th>Type</th>${cols.map(k=>`<th>${k}</th>`).join("")}</tr>`;
@@ -92,9 +82,7 @@ function renderExactHits(title, rows, types, hasBonus=false) {
       ul.append(el("li","muted","—"));
     } else {
       matched.forEach(r=>{
-        const txt = hasBonus
-          ? `#${r.row}: [${(r.mains||[]).join(", ")}]  + ${r.bonus}`
-          : `#${r.row}: [${(r.mains||[]).join(", ")}]`;
+        const txt = hasBonus ? `#${r.row}: [${(r.mains||[]).join(", ")}]  + ${r.bonus}` : `#${r.row}: [${(r.mains||[]).join(", ")}]`;
         ul.append(el("li","mono", txt));
       });
     }
@@ -114,14 +102,13 @@ function renderBuyTable(title, list, hasBonus=true) {
     tb.append(tr);
   });
   if (!list || !list.length) {
-    const tr = el("tr");
-    tr.innerHTML = `<td colspan="${hasBonus?3:2}" class="muted">—</td>`;
-    tb.append(tr);
+    const tr = el("tr"); tr.innerHTML = `<td colspan="${hasBonus?3:2}" class="muted">—</td>`; tb.append(tr);
   }
   c.append(tbl); return c;
 }
 
-/* Robust: supports arrays, maps, or numbers */
+/* Robust aggregated-hits renderer: supports arrays, position->count maps, or totals.
+   Also supports multiple possible keys in the phase-2 response. */
 function renderAggHits(title, agg, withBonus=false) {
   const c = el("div","card"); c.append(el("h3","",title));
   const cols = withBonus ? ["3","3B","4","4B","5","5B"] : ["3","4","5","6"];
@@ -131,41 +118,22 @@ function renderAggHits(title, agg, withBonus=false) {
   const tbody = el("tbody");
 
   function normalize(v) {
-    // 1) array of positions
-    if (Array.isArray(v)) {
-      const m = new Map();
-      v.forEach(p => m.set(p,(m.get(p)||0)+1));
-      return { total: v.length, posMap: m };
-    }
-    // 2) object map {pos: count}
-    if (v && typeof v === "object") {
-      let total = 0; const m = new Map();
-      for (const [pos, cnt] of Object.entries(v)) {
-        const n = Number(cnt)||0; total += n; m.set(pos,(m.get(pos)||0)+n);
-      }
-      return { total, posMap: m };
-    }
-    // 3) number only
-    if (typeof v === "number") return { total: v, posMap: null };
-    return { total: 0, posMap: null };
+    if (Array.isArray(v)) { const m=new Map(); v.forEach(p=>m.set(p,(m.get(p)||0)+1)); return { total:v.length, posMap:m }; }
+    if (v && typeof v === "object") { let total=0; const m=new Map(); for (const [pos,c] of Object.entries(v)){ const n=Number(c)||0; total+=n; m.set(pos,(m.get(pos)||0)+n); } return { total, posMap:m }; }
+    if (typeof v === "number") return { total:v, posMap:null };
+    return { total:0, posMap:null };
   }
   function topPositions(posMap, k=6) {
     if (!posMap) return "—";
     const arr = [...posMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k);
-    if (!arr.length) return "—";
-    return arr.map(([p,c])=>`${p}(${c})`).join(", ");
+    return arr.length ? arr.map(([p,c])=>`${p}(${c})`).join(", ") : "—";
   }
-
   cols.forEach(k=>{
     const { total, posMap } = normalize(agg?.[k]);
-    const tr = el("tr");
-    tr.innerHTML = `<td>${k}</td><td class="mono">${total}</td><td class="mono">${topPositions(posMap)}</td>`;
+    const tr = el("tr"); tr.innerHTML = `<td>${k}</td><td class="mono">${total}</td><td class="mono">${topPositions(posMap)}</td>`;
     tbody.append(tr);
   });
-
-  tbl.append(thead, tbody);
-  c.append(tbl);
-  return c;
+  tbl.append(thead, tbody); c.append(tbl); return c;
 }
 
 /* ------------------ Phase 1 ------------------ */
@@ -185,23 +153,17 @@ async function runPhase1() {
     phase: "phase1",
   };
 
-  const btn = document.querySelector("#btn_p1");
-  btn.disabled = true; btn.textContent = "Running…";
+  const btn = document.querySelector("#btn_p1"); btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p1"); out.innerHTML = "";
-
   const data = await postJSON("/run_json", payload);
 
   if (!data || data.error) {
     out.append(el("div","card", `<strong>Error:</strong> ${data?.error || "unknown"}`));
     if (data?.detail) out.append(el("div","card", `<pre class="mono">${data.detail}</pre>`));
-    btn.disabled = false; btn.textContent = "Run Phase 1";
-    return;
+    btn.disabled = false; btn.textContent = "Run Phase 1"; return;
   }
 
-  // Bands
   out.append(renderBands(data.bands));
-
-  // Summary hits (positions)
   const hits = data.eval_vs_NJ || {};
   const cards = el("div","cards");
   cards.append(renderHitPositions("MM hits vs NJ", hits.MM, true));
@@ -212,7 +174,6 @@ async function runPhase1() {
   cards.append(renderHitPositions("IL Million 2 (6) vs NJ", il.M2, false));
   out.append(cards);
 
-  // Exact-hit rows FIRST
   if (data.batches) {
     const B = data.batches;
     const hitCards = el("div","cards");
@@ -225,7 +186,6 @@ async function runPhase1() {
     }
     out.append(hitCards);
 
-    // Then the 50-row detailed tables
     const tables = el("div","cards");
     if (Array.isArray(B.MM)) tables.append(renderBatchTableMM("MM — 50-row batch", B.MM));
     if (Array.isArray(B.PB)) tables.append(renderBatchTableMM("PB — 50-row batch", B.PB));
@@ -239,36 +199,34 @@ async function runPhase1() {
 
   if (data.saved_path) {
     const p = el("div","okline", `Saved Phase-1 state: <span class="mono">${data.saved_path}</span>`);
-    p.appendChild(copyBtn(data.saved_path));
-    out.append(p);
+    p.appendChild(copyBtn(data.saved_path)); out.append(p);
   }
 
   btn.disabled = false; btn.textContent = "Run Phase 1";
 }
 
 /* ------------------ Phase 2 ------------------ */
+function pickAggHitsObject(data) {
+  // Try common keys the backend might use
+  return data.agg_hits || data.stats || data.aggregated || data.hit_totals || data.hits || {};
+}
 async function runPhase2() {
   const saved = document.querySelector("#p2_saved").value.trim();
   if (!saved) { alert("Paste the Phase-1 saved_path first."); return; }
   const payload = { phase: "phase2", saved_path: saved };
 
-  const btn = document.querySelector("#btn_p2");
-  btn.disabled = true; btn.textContent = "Running…";
+  const btn = document.querySelector("#btn_p2"); btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p2"); out.innerHTML = "";
-
   const data = await postJSON("/run_json", payload);
 
   if (!data || data.error) {
     out.append(el("div","card", `<strong>Error:</strong> ${data?.error || "unknown"}`));
     if (data?.detail) out.append(el("div","card", `<pre class="mono">${data.detail}</pre>`));
-    btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
-    return;
+    btn.disabled = false; btn.textContent = "Run Phase 2 (100×)"; return;
   }
 
-  // Bands
   out.append(renderBands(data.bands));
 
-  // BUY LISTS (actual tickets)
   const buys = data.buy_lists || {};
   const buyWrap = el("div","cards");
   buyWrap.append(renderBuyTable("MM — buy list (10 tickets)", buys.MM || [], true));
@@ -276,8 +234,7 @@ async function runPhase2() {
   buyWrap.append(renderBuyTable("IL — buy list (15 tickets)", buys.IL || [], false));
   out.append(buyWrap);
 
-  // Aggregated hits across 100 runs (robust)
-  const agg = data.agg_hits || {};
+  const agg = pickAggHitsObject(data) || {};
   const aggWrap = el("div","cards");
   aggWrap.append(renderAggHits("MM — 100× aggregated hits", agg.MM || {}, true));
   aggWrap.append(renderAggHits("PB — 100× aggregated hits", agg.PB || {}, true));
@@ -285,13 +242,17 @@ async function runPhase2() {
     aggWrap.append(renderAggHits("IL JP — 100× aggregated hits", agg.IL.JP || {}, false));
     aggWrap.append(renderAggHits("IL M1 — 100× aggregated hits", agg.IL.M1 || {}, false));
     aggWrap.append(renderAggHits("IL M2 — 100× aggregated hits", agg.IL.M2 || {}, false));
+  } else {
+    // If no IL key, still render empty cards for consistency
+    aggWrap.append(renderAggHits("IL JP — 100× aggregated hits", {}, false));
+    aggWrap.append(renderAggHits("IL M1 — 100× aggregated hits", {}, false));
+    aggWrap.append(renderAggHits("IL M2 — 100× aggregated hits", {}, false));
   }
   out.append(aggWrap);
 
   if (data.saved_path) {
     const p = el("div","okline", `Saved Phase-2 state: <span class="mono">${data.saved_path}</span>`);
-    p.appendChild(copyBtn(data.saved_path));
-    out.append(p);
+    p.appendChild(copyBtn(data.saved_path)); out.append(p);
   }
 
   btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
@@ -304,16 +265,14 @@ async function runPhase3() {
   let nwj; try { nwj = JSON.parse(document.querySelector("#p3_nwj").value || "{}"); } catch { nwj = null; }
   const payload = { saved_path: saved }; if (nwj && Object.keys(nwj).length) payload.NWJ = nwj;
 
-  const btn = document.querySelector("#btn_p3");
-  btn.disabled = true; btn.textContent = "Running…";
+  const btn = document.querySelector("#btn_p3"); btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p3"); out.innerHTML = "";
   const data = await postJSON("/confirm_json", payload);
 
   if (!data || data.error) {
     out.append(el("div","card", `<strong>Error:</strong> ${data?.error || "unknown"}`));
     if (data?.detail) out.append(el("div","card", `<pre class="mono">${data.detail}</pre>`));
-    btn.disabled = false; btn.textContent = "Confirm vs NWJ";
-    return;
+    btn.disabled = false; btn.textContent = "Confirm vs NWJ"; return;
   }
 
   const hits = data.confirm_hits || {};
@@ -336,12 +295,7 @@ async function getRecent() {
   const files = (data.files || []).slice(0, 20);
   const list = el("div","cards");
   if (!files.length) list.append(el("div","card","No saved files yet."));
-  files.forEach(f => {
-    const c = el("div","card");
-    c.append(el("div","mono", f));
-    c.append(copyBtn(f));
-    list.append(c);
-  });
+  files.forEach(f => { const c=el("div","card"); c.append(el("div","mono", f)); c.append(copyBtn(f)); list.append(c); });
   out.append(list);
 }
 
