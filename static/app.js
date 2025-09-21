@@ -1,10 +1,26 @@
-// static/app.js v8 — layout-only update per your requests.
-// - No Phase-1/3 autofill buttons.
-// - Date boxes are plain text "M/D/YYYY".
-// - On load, we prefill the pivot boxes with 3rd-newest dates so that "Load 20" puts that 3rd newest line first.
+// static/app.js v9 — calendar pickers + MM/DD/YYYY formatting for all dates.
 
 (function () {
   const $ = (id) => document.getElementById(id);
+
+  // ---- Date format helpers ----
+  // <input type="date"> uses YYYY-MM-DD; we want to store/send MM/DD/YYYY.
+  const pad2 = (n) => String(n).padStart(2, "0");
+
+  function ymdToMDY(ymd) {
+    // "2025-09-15" -> "09/15/2025"
+    if (!ymd) return "";
+    const [y, m, d] = ymd.split("-");
+    if (!y || !m || !d) return "";
+    return `${pad2(m)}/${pad2(d)}/${y}`;
+  }
+  function mdyToYMD(mdy) {
+    // "09/15/2025" -> "2025-09-15"
+    if (!mdy) return "";
+    const [m, d, y] = mdy.split("/").map(s=>s.trim());
+    if (!y || !m || !d) return "";
+    return `${y}-${pad2(m)}-${pad2(d)}`;
+  }
 
   async function postJSON(url, payload) {
     const res = await fetch(url, {
@@ -37,28 +53,28 @@
   });
 
   // -------- History Slice helpers ----------
-  async function historySlice(game, tier, pivot, limit=20) {
-    return await postJSON("/history_slice", { game, tier, pivot_date: pivot, limit });
+  async function historySlice(game, tier, pivotMDY, limit=20) {
+    return await postJSON("/history_slice", { game, tier, pivot_date: pivotMDY, limit });
   }
 
   async function load20_MM(){
-    const p = $("mmPivot").value.trim();
-    if(!p) return alert("Enter MM pivot date (M/D/YYYY)");
-    const r = await historySlice("MM","",p,20);
+    const pivotYMD = $("mmPivot").value;
+    if(!pivotYMD) return alert("Pick MM pivot date");
+    const r = await historySlice("MM","", ymdToMDY(pivotYMD), 20);
     if(r.ok) $("histMM").value = r.blob || "";
   }
   async function load20_PB(){
-    const p = $("pbPivot").value.trim();
-    if(!p) return alert("Enter PB pivot date (M/D/YYYY)");
-    const r = await historySlice("PB","",p,20);
+    const pivotYMD = $("pbPivot").value;
+    if(!pivotYMD) return alert("Pick PB pivot date");
+    const r = await historySlice("PB","", ymdToMDY(pivotYMD), 20);
     if(r.ok) $("histPB").value = r.blob || "";
   }
   async function load20_IL(tier){
     const id = tier==="JP"?"ilJpPivot":tier==="M1"?"ilM1Pivot":"ilM2Pivot";
     const outId = tier==="JP"?"histIL_JP":tier==="M1"?"histIL_M1":"histIL_M2";
-    const p = $(id).value.trim();
-    if(!p) return alert(`Enter IL ${tier} pivot date (M/D/YYYY)`);
-    const r = await historySlice("IL",tier,p,20);
+    const pivotYMD = $(id).value;
+    if(!pivotYMD) return alert(`Pick IL ${tier} pivot date`);
+    const r = await historySlice("IL", tier, ymdToMDY(pivotYMD), 20);
     if(r.ok) $(outId).value = r.blob || "";
   }
 
@@ -68,16 +84,16 @@
   $("ilM1Retrieve")?.addEventListener("click", ()=>load20_IL("M1"));
   $("ilM2Retrieve")?.addEventListener("click", ()=>load20_IL("M2"));
 
-  // Prefill pivot dates with 3rd newest on load (no buttons shown)
+  // Prefill pivot calendars with 3rd-newest dates (convert M/D/YYYY -> YYYY-MM-DD)
   (async function prefillPivots(){
     try{
       const j = await fetch("/third_newest_dates", {cache:"no-store"}).then(r=>r.json());
       const p = j?.phase1 || {};
-      if (p.MM)   $("mmPivot").value  = p.MM;
-      if (p.PB)   $("pbPivot").value  = p.PB;
-      if (p.IL_JP) $("ilJpPivot").value = p.IL_JP;
-      if (p.IL_M1) $("ilM1Pivot").value = p.IL_M1;
-      if (p.IL_M2) $("ilM2Pivot").value = p.IL_M2;
+      if (p.MM)   $("mmPivot").value  = mdyToYMD(p.MM);
+      if (p.PB)   $("pbPivot").value  = mdyToYMD(p.PB);
+      if (p.IL_JP) $("ilJpPivot").value = mdyToYMD(p.IL_JP);
+      if (p.IL_M1) $("ilM1Pivot").value = mdyToYMD(p.IL_M1);
+      if (p.IL_M2) $("ilM2Pivot").value = mdyToYMD(p.IL_M2);
     }catch(e){
       console.warn("prefill pivots failed", e);
     }
@@ -93,11 +109,11 @@
         LATEST_IL_M1: eval($("il_m1_latest").value || "null"),
         LATEST_IL_M2: eval($("il_m2_latest").value || "null"),
         dates: {
-          MM  : $("mm_date").value || null,
-          PB  : $("pb_date").value || null,
-          IL_JP: $("il_jp_date").value || null,
-          IL_M1: $("il_m1_date").value || null,
-          IL_M2: $("il_m2_date").value || null,
+          MM  : ymdToMDY($("mm_date").value),
+          PB  : ymdToMDY($("pb_date").value),
+          IL_JP: ymdToMDY($("il_jp_date").value),
+          IL_M1: ymdToMDY($("il_m1_date").value),
+          IL_M2: ymdToMDY($("il_m2_date").value),
         }
       };
       const out = await postJSON("/hist_add", payload);
@@ -141,7 +157,7 @@
       const fmtAgg = (agg)=>Object.entries(agg||{}).map(([k,arr])=>{
         const freq = {}; (arr||[]).forEach(p=>freq[p]=(freq[p]||0)+1);
         const top = Object.entries(freq).sort((a,b)=>b[1]-a[1]||(+a[0]-(+b[0]))).slice(0,8).map(([r,c])=>`${r}(${c})`).join(", ");
-        return `${k}\tcount=${(arr||[]).length}\trows: ${top||"—"}`;
+        return `${k}\tcount=${(arr||[]).length}\trows: ${top||"—"}`);
       }).join("\n") || "—";
       $("mm_agg").textContent = fmtAgg(out.agg_hits?.MM);
       $("pb_agg").textContent = fmtAgg(out.agg_hits?.PB);
@@ -175,9 +191,8 @@
   // -------- Phase 3 ----------
   $("btn_run_p3").addEventListener("click", async ()=>{
     try{
-      const p2 = $("p3_input_path").value.trim();
+      const p2 = $("p3_input_path").value?.trim() || $("p2_saved_path").value.trim();
 
-      // Build NWJ JSON from Phase-3 five boxes
       const toPair = (txt) => (txt && txt.trim()) ? eval(txt.trim()) : null;
       const NWJ = {
         LATEST_MM   : toPair($("mm_latest_p3").value),
