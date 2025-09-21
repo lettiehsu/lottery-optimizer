@@ -1,5 +1,11 @@
-/* static/app.js — light theme, exact hit rows */
+/* static/app.js — light theme UI with:
+   - Phase 1: bands, summary hits, exact hit rows (above), 50-row tables (below)
+   - Phase 2: buy list tables + aggregated 100× hit stats
+   - Phase 3: confirmation hits vs NWJ
+   - Recent saved files
+*/
 
+/* ------------------ helpers ------------------ */
 async function postJSON(url, data) {
   const res = await fetch(url, {
     method: "POST",
@@ -16,14 +22,14 @@ function el(tag, cls, html) {
   if (html !== undefined) n.innerHTML = html;
   return n;
 }
+function pill(x){ return `<span class="pill">${x}</span>`; }
 function copyBtn(text) {
   const b = el("button", "copy", "Copy");
   b.onclick = () => { navigator.clipboard.writeText(text); b.textContent = "Copied"; setTimeout(()=>b.textContent="Copy",1200); };
   return b;
 }
-function pill(x){ return `<span class="pill">${x}</span>`; }
 
-/* ---------- cards/tables ---------- */
+/* ------------------ renderers ------------------ */
 function renderBands(bands) {
   const wrap = el("div","cards");
   for (const [game,[lo,hi]] of Object.entries(bands||{})) {
@@ -75,7 +81,6 @@ function renderBatchTableIL(title, rows) {
   c.append(tbl); return c;
 }
 
-/* exact rows list by category */
 function renderExactHits(title, rows, types, hasBonus=false) {
   const c = el("div","card"); c.append(el("h3","",title));
   types.forEach(t=>{
@@ -98,7 +103,46 @@ function renderExactHits(title, rows, types, hasBonus=false) {
   return c;
 }
 
-/* ---------- Phase 1 ---------- */
+function renderBuyTable(title, list, hasBonus=true) {
+  const c = el("div","card"); c.append(el("h3","",title));
+  const tbl = el("table","tbl");
+  tbl.innerHTML = `<thead><tr><th>#</th><th>Mains</th>${hasBonus?'<th>Bonus</th>':''}</tr></thead><tbody></tbody>`;
+  const tb = tbl.querySelector("tbody");
+  (list||[]).forEach((t,i)=>{
+    const tr = el("tr");
+    tr.innerHTML = `<td>${i+1}</td><td class="mono">${(t.mains||[]).join(", ")}</td>${hasBonus?`<td class="mono">${t.bonus==null?'—':t.bonus}</td>`:''}`;
+    tb.append(tr);
+  });
+  if (!list || !list.length) {
+    const tr = el("tr");
+    tr.innerHTML = `<td colspan="${hasBonus?3:2}" class="muted">—</td>`;
+    tb.append(tr);
+  }
+  c.append(tbl); return c;
+}
+
+function renderAggHits(title, agg, withBonus=false) {
+  const c = el("div","card"); c.append(el("h3","",title));
+  const cols = withBonus ? ["3","3B","4","4B","5","5B"] : ["3","4","5","6"];
+  const tbl = el("table","tbl");
+  const thead = el("thead"); thead.innerHTML = `<tr><th>Type</th><th>Total hits</th><th>Top positions</th></tr>`;
+  const tbody = el("tbody");
+  const topK = (arr, k=6) => {
+    const m = new Map();
+    (arr||[]).forEach(p => m.set(p,(m.get(p)||0)+1));
+    return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k).map(([p,cnt])=>`${p}(${cnt})`).join(", ");
+  };
+  cols.forEach(k=>{
+    const arr = agg?.[k] || [];
+    const tr = el("tr");
+    tr.innerHTML = `<td>${k}</td><td class="mono">${arr.length}</td><td class="mono">${arr.length? topK(arr) : "—"}</td>`;
+    tbody.append(tr);
+  });
+  tbl.append(thead, tbody); c.append(tbl);
+  return c;
+}
+
+/* ------------------ Phase 1 ------------------ */
 async function runPhase1() {
   const payload = {
     LATEST_MM: document.querySelector("#p1_mm").value.trim(),
@@ -114,6 +158,7 @@ async function runPhase1() {
     HIST_IL_BLOB: document.querySelector("#p1_hist_il").value.trim(),
     phase: "phase1",
   };
+
   const btn = document.querySelector("#btn_p1");
   btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p1"); out.innerHTML = "";
@@ -122,6 +167,7 @@ async function runPhase1() {
 
   if (!data || data.error) {
     out.append(el("div","card", `<strong>Error:</strong> ${data?.error || "unknown"}`));
+    if (data?.detail) out.append(el("div","card", `<pre class="mono">${data.detail}</pre>`));
     btn.disabled = false; btn.textContent = "Run Phase 1";
     return;
   }
@@ -129,7 +175,7 @@ async function runPhase1() {
   // Bands
   out.append(renderBands(data.bands));
 
-  // Summary hit positions
+  // Summary hits (positions)
   const hits = data.eval_vs_NJ || {};
   const cards = el("div","cards");
   cards.append(renderHitPositions("MM hits vs NJ", hits.MM, true));
@@ -140,31 +186,30 @@ async function runPhase1() {
   cards.append(renderHitPositions("IL Million 2 (6) vs NJ", il.M2, false));
   out.append(cards);
 
+  // Exact-hit rows FIRST
   if (data.batches) {
-  const B = data.batches;
+    const B = data.batches;
+    const hitCards = el("div","cards");
+    if (Array.isArray(B.MM)) hitCards.append(renderExactHits("MM — exact hit rows", B.MM, ["3","3B","4","4B","5","5B"], true));
+    if (Array.isArray(B.PB)) hitCards.append(renderExactHits("PB — exact hit rows", B.PB, ["3","3B","4","4B","5","5B"], true));
+    if (B.IL) {
+      hitCards.append(renderExactHits("IL JP — exact hit rows", B.IL.JP || [], ["3","4","5","6"], false));
+      hitCards.append(renderExactHits("IL M1 — exact hit rows", B.IL.M1 || [], ["3","4","5","6"], false));
+      hitCards.append(renderExactHits("IL M2 — exact hit rows", B.IL.M2 || [], ["3","4","5","6"], false));
+    }
+    out.append(hitCards);
 
-  // Exact hit rows per category — show these first
-  const hitCards = el("div","cards");
-  if (Array.isArray(B.MM)) hitCards.append(renderExactHits("MM — exact hit rows", B.MM, ["3","3B","4","4B","5","5B"], true));
-  if (Array.isArray(B.PB)) hitCards.append(renderExactHits("PB — exact hit rows", B.PB, ["3","3B","4","4B","5","5B"], true));
-  if (B.IL) {
-    hitCards.append(renderExactHits("IL JP — exact hit rows", B.IL.JP || [], ["3","4","5","6"], false));
-    hitCards.append(renderExactHits("IL M1 — exact hit rows", B.IL.M1 || [], ["3","4","5","6"], false));
-    hitCards.append(renderExactHits("IL M2 — exact hit rows", B.IL.M2 || [], ["3","4","5","6"], false));
+    // Then the 50-row detailed tables
+    const tables = el("div","cards");
+    if (Array.isArray(B.MM)) tables.append(renderBatchTableMM("MM — 50-row batch", B.MM));
+    if (Array.isArray(B.PB)) tables.append(renderBatchTableMM("PB — 50-row batch", B.PB));
+    if (B.IL) {
+      tables.append(renderBatchTableIL("IL JP — 50-row batch", B.IL.JP || []));
+      tables.append(renderBatchTableIL("IL M1 — 50-row batch", B.IL.M1 || []));
+      tables.append(renderBatchTableIL("IL M2 — 50-row batch", B.IL.M2 || []));
+    }
+    out.append(tables);
   }
-  out.append(hitCards);
-
-  // Then the 50-row detailed tables
-  const tables = el("div","cards");
-  if (Array.isArray(B.MM)) tables.append(renderBatchTableMM("MM — 50-row batch", B.MM));
-  if (Array.isArray(B.PB)) tables.append(renderBatchTableMM("PB — 50-row batch", B.PB));
-  if (B.IL) {
-    tables.append(renderBatchTableIL("IL JP — 50-row batch", B.IL.JP || []));
-    tables.append(renderBatchTableIL("IL M1 — 50-row batch", B.IL.M1 || []));
-    tables.append(renderBatchTableIL("IL M2 — 50-row batch", B.IL.M2 || []));
-  }
-  out.append(tables);
-}
 
   if (data.saved_path) {
     const p = el("div","okline", `Saved Phase-1 state: <span class="mono">${data.saved_path}</span>`);
@@ -175,29 +220,47 @@ async function runPhase1() {
   btn.disabled = false; btn.textContent = "Run Phase 1";
 }
 
-/* ---------- Phase 2 ---------- */
+/* ------------------ Phase 2 ------------------ */
 async function runPhase2() {
   const saved = document.querySelector("#p2_saved").value.trim();
   if (!saved) { alert("Paste the Phase-1 saved_path first."); return; }
   const payload = { phase: "phase2", saved_path: saved };
+
   const btn = document.querySelector("#btn_p2");
   btn.disabled = true; btn.textContent = "Running…";
   const out = document.querySelector("#out_p2"); out.innerHTML = "";
+
   const data = await postJSON("/run_json", payload);
 
   if (!data || data.error) {
     out.append(el("div","card", `<strong>Error:</strong> ${data?.error || "unknown"}`));
+    if (data?.detail) out.append(el("div","card", `<pre class="mono">${data.detail}</pre>`));
     btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
     return;
   }
 
+  // Bands
   out.append(renderBands(data.bands));
+
+  // BUY LISTS (actual tickets)
   const buys = data.buy_lists || {};
-  const cards = el("div","cards");
-  cards.append(renderExactHits("MM — buy list (10 tickets)", (buys.MM||[]).map((t,i)=>({row:i+1,mains:t.mains,bonus:t.bonus,sum:(t.mains||[]).reduce((a,b)=>a+b,0)})), ["—"], true));
-  cards.append(renderExactHits("PB — buy list (10 tickets)", (buys.PB||[]).map((t,i)=>({row:i+1,mains:t.mains,bonus:t.bonus,sum:(t.mains||[]).reduce((a,b)=>a+b,0)})), ["—"], true));
-  cards.append(renderExactHits("IL — buy list (15 tickets)", (buys.IL||[]).map((t,i)=>({row:i+1,mains:t.mains,bonus:null,sum:(t.mains||[]).reduce((a,b)=>a+b,0)})), ["—"], false));
-  out.append(cards);
+  const buyWrap = el("div","cards");
+  buyWrap.append(renderBuyTable("MM — buy list (10 tickets)", buys.MM || [], true));
+  buyWrap.append(renderBuyTable("PB — buy list (10 tickets)", buys.PB || [], true));
+  buyWrap.append(renderBuyTable("IL — buy list (15 tickets)", buys.IL || [], false));
+  out.append(buyWrap);
+
+  // Aggregated hits across 100 runs
+  const agg = data.agg_hits || {};
+  const aggWrap = el("div","cards");
+  aggWrap.append(renderAggHits("MM — 100× aggregated hits", agg.MM || {}, true));
+  aggWrap.append(renderAggHits("PB — 100× aggregated hits", agg.PB || {}, true));
+  if (agg.IL) {
+    aggWrap.append(renderAggHits("IL JP — 100× aggregated hits", agg.IL.JP || {}, false));
+    aggWrap.append(renderAggHits("IL M1 — 100× aggregated hits", agg.IL.M1 || {}, false));
+    aggWrap.append(renderAggHits("IL M2 — 100× aggregated hits", agg.IL.M2 || {}, false));
+  }
+  out.append(aggWrap);
 
   if (data.saved_path) {
     const p = el("div","okline", `Saved Phase-2 state: <span class="mono">${data.saved_path}</span>`);
@@ -208,7 +271,7 @@ async function runPhase2() {
   btn.disabled = false; btn.textContent = "Run Phase 2 (100×)";
 }
 
-/* ---------- Phase 3 ---------- */
+/* ------------------ Phase 3 ------------------ */
 async function runPhase3() {
   const saved = document.querySelector("#p3_saved").value.trim();
   if (!saved) { alert("Paste the Phase-2 saved_path first."); return; }
@@ -222,6 +285,7 @@ async function runPhase3() {
 
   if (!data || data.error) {
     out.append(el("div","card", `<strong>Error:</strong> ${data?.error || "unknown"}`));
+    if (data?.detail) out.append(el("div","card", `<pre class="mono">${data.detail}</pre>`));
     btn.disabled = false; btn.textContent = "Confirm vs NWJ";
     return;
   }
@@ -239,7 +303,7 @@ async function runPhase3() {
   btn.disabled = false; btn.textContent = "Confirm vs NWJ";
 }
 
-/* ---------- Recent ---------- */
+/* ------------------ Recent files ------------------ */
 async function getRecent() {
   const out = document.querySelector("#out_recent"); out.innerHTML = "";
   const res = await fetch("/recent"); const data = await res.json();
@@ -255,6 +319,7 @@ async function getRecent() {
   out.append(list);
 }
 
+/* ------------------ wire up ------------------ */
 document.querySelector("#btn_p1").addEventListener("click", runPhase1);
 document.querySelector("#btn_p2").addEventListener("click", runPhase2);
 document.querySelector("#btn_p3").addEventListener("click", runPhase3);
