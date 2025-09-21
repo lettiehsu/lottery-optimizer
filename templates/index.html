@@ -13,7 +13,7 @@
     .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
     .col-12{grid-column:span 12}.col-8{grid-column:span 8}.col-6{grid-column:span 6}.col-4{grid-column:span 4}
     label{display:block;font-weight:600;margin:6px 0 4px}
-    input[type=text],textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
+    input[type=text],input[type=date],textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
     textarea{min-height:84px;resize:vertical}
     .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
     .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -27,7 +27,7 @@
   <div class="wrap">
     <h1>Lottery Optimizer</h1>
 
-    <!-- ============== CSV UPLOAD ============== -->
+    <!-- CSV upload stays the same -->
     <h2>Bulk import history (CSV)</h2>
     <div class="card">
       <form id="csv_form">
@@ -38,31 +38,31 @@
       <pre id="import_out" class="mono muted">—</pre>
     </div>
 
-    <!-- ============== PHASE 1 ============== -->
+    <!-- PHASE 1 -->
     <h2>Phase 1 — Evaluation</h2>
     <div class="row">
       <div class="card col-6">
         <h3>The 2nd Newest jackpots — with per-game dates</h3>
-        <div class="muted mono">Format: [[mains…], bonus]; IL bonus is null. Put date above numbers.</div>
+        <div class="muted mono">Format: [[mains…], bonus]; IL bonus is null. Pick the date above numbers.</div>
 
         <label for="mm_date">Mega Millions</label>
-        <input id="mm_date" type="text" placeholder="M/D/YYYY" />
+        <input id="mm_date" type="date" />
         <input id="mm_latest" type="text" placeholder="[[10,14,34,40,43], 5]" />
 
         <label for="pb_date">Powerball</label>
-        <input id="pb_date" type="text" placeholder="M/D/YYYY" />
+        <input id="pb_date" type="date" />
         <input id="pb_latest" type="text" placeholder="[[7,30,59,64,69], 20]" />
 
         <label for="il_jp_date">IL Lotto — Jackpot</label>
-        <input id="il_jp_date" type="text" placeholder="M/D/YYYY" />
+        <input id="il_jp_date" type="date" />
         <input id="il_jp_latest" type="text" placeholder="[[1,4,5,10,18,49], null]" />
 
         <label for="il_m1_date">IL Lotto — Million 1</label>
-        <input id="il_m1_date" type="text" placeholder="M/D/YYYY" />
+        <input id="il_m1_date" type="date" />
         <input id="il_m1_latest" type="text" placeholder="[[6,8,10,18,26,27], null]" />
 
         <label for="il_m2_date">IL Lotto — Million 2</label>
-        <input id="il_m2_date" type="text" placeholder="M/D/YYYY" />
+        <input id="il_m2_date" type="date" />
         <input id="il_m2_latest" type="text" placeholder="[[2,18,21,27,43,50], null]" />
 
         <div class="toolbar">
@@ -85,23 +85,23 @@
       </div>
     </div>
 
-    <!-- HIST with pivot (M/D/YYYY) -->
+    <!-- HIST with pivot calendars -->
     <div class="row" style="margin-top:8px">
       <div class="card col-4">
         <h3>HIST_MM_BLOB</h3>
         <div class="toolbar">
-          <input id="mmPivot" type="text" placeholder="M/D/YYYY" title="Pivot date (3rd newest prefilled)"/>
+          <input id="mmPivot" type="date" title="Pivot date (3rd newest prefilled)"/>
           <button id="mmRetrieve" class="btn small">Load 20</button>
         </div>
-        <textarea id="histMM" class="mono" rows="14" placeholder="M/D/YYYY  10-14-34-40-43 05&#10;..."></textarea>
+        <textarea id="histMM" class="mono" rows="14" placeholder="MM/DD/YYYY  10-14-34-40-43 05&#10;..."></textarea>
       </div>
       <div class="card col-4">
         <h3>HIST_PB_BLOB</h3>
         <div class="toolbar">
-          <input id="pbPivot" type="text" placeholder="M/D/YYYY" title="Pivot date (3rd newest prefilled)"/>
+          <input id="pbPivot" type="date" title="Pivot date (3rd newest prefilled)"/>
           <button id="pbRetrieve" class="btn small">Load 20</button>
         </div>
-        <textarea id="histPB" class="mono" rows="14" placeholder="M/D/YYYY  28-37-42-50-53 19&#10;..."></textarea>
+        <textarea id="histPB" class="mono" rows="14" placeholder="MM/DD/YYYY  28-37-42-50-53 19&#10;..."></textarea>
       </div>
       <div class="card col-4">
         <h3>HIST_IL_BLOB (JP / M1 / M2)</h3>
@@ -109,7 +109,7 @@
           <div>
             <div class="muted">JP</div>
             <div class="toolbar" style="gap:6px">
-              <input id="ilJpPivot" type="text" placeholder="M/D/YYYY"/>
+              <input id="ilJpPivot" type="date"/>
               <button id="ilJpRetrieve" class="btn small">Load 20</button>
             </div>
             <textarea id="histIL_JP" class="mono" rows="6"></textarea>
@@ -117,7 +117,7 @@
           <div>
             <div class="muted">M1</div>
             <div class="toolbar" style="gap:6px">
-              <input id="ilM1Pivot" type="text" placeholder="M/D/YYYY"/>
+              <input id="ilM1Pivot" type="date"/>
               <button id="ilM1Retrieve" class="btn small">Load 20</button>
             </div>
             <textarea id="histIL_M1" class="mono" rows="6"></textarea>
@@ -125,7 +125,7 @@
           <div>
             <div class="muted">M2</div>
             <div class="toolbar" style="gap:6px">
-              <input id="ilM2Pivot" type="text" placeholder="M/D/YYYY"/>
+              <input id="ilM2Pivot" type="date"/>
               <button id="ilM2Retrieve" class="btn small">Load 20</button>
             </div>
             <textarea id="histIL_M2" class="mono" rows="6"></textarea>
@@ -140,7 +140,7 @@
       </div>
     </div>
 
-    <!-- ============== PHASE 2 ============== -->
+    <!-- PHASE 2 (unchanged content-wise) -->
     <h2>Phase 2 — Prediction (100×)</h2>
     <div class="card">
       <div class="toolbar">
@@ -163,30 +163,30 @@
       </div>
     </div>
 
-    <!-- ============== PHASE 3 ============== -->
+    <!-- PHASE 3 -->
     <h2>Phase 3 — Confirmation</h2>
     <div class="card">
       <h3>The 1st Newest jackpots — with per-game dates</h3>
-      <div class="muted mono">Same format as Phase 1. We’ll build NWJ JSON for you.</div>
+      <div class="muted mono">Same format as Phase 1. We build NWJ JSON from these fields.</div>
 
       <label for="mm_date_p3">Mega Millions</label>
-      <input id="mm_date_p3" type="text" placeholder="M/D/YYYY"/>
+      <input id="mm_date_p3" type="date"/>
       <input id="mm_latest_p3" type="text" placeholder="[[10,14,34,40,43], 5]"/>
 
       <label for="pb_date_p3">Powerball</label>
-      <input id="pb_date_p3" type="text" placeholder="M/D/YYYY"/>
+      <input id="pb_date_p3" type="date"/>
       <input id="pb_latest_p3" type="text" placeholder="[[14,15,32,42,49], 1]"/>
 
       <label for="il_jp_date_p3">IL Lotto — Jackpot</label>
-      <input id="il_jp_date_p3" type="text" placeholder="M/D/YYYY"/>
+      <input id="il_jp_date_p3" type="date"/>
       <input id="il_jp_latest_p3" type="text" placeholder="[[1,4,5,10,18,49], null]"/>
 
       <label for="il_m1_date_p3">IL Lotto — Million 1</label>
-      <input id="il_m1_date_p3" type="text" placeholder="M/D/YYYY"/>
+      <input id="il_m1_date_p3" type="date"/>
       <input id="il_m1_latest_p3" type="text" placeholder="[[6,8,10,18,26,27], null]"/>
 
       <label for="il_m2_date_p3">IL Lotto — Million 2</label>
-      <input id="il_m2_date_p3" type="text" placeholder="M/D/YYYY"/>
+      <input id="il_m2_date_p3" type="date"/>
       <input id="il_m2_latest_p3" type="text" placeholder="[[2,18,21,27,43,50], null]"/>
 
       <div class="toolbar"><button id="btn_run_p3" class="btn primary">Confirm vs NWJ</button></div>
@@ -207,6 +207,6 @@
     <pre id="recent_out" class="mono muted card">—</pre>
   </div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>
