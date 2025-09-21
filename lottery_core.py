@@ -606,9 +606,9 @@ def run_phase1(data: dict) -> dict:
 
 def run_phase2(saved_phase1_path: str) -> dict:
     """
-    Load Phase-1 state and run 100 regenerations of 50-row batches,
+    Load Phase-1 state and run N_PHASE2_RUNS regenerations of 50-row batches,
     label each row’s hit vs the same NJ, and aggregate row positions.
-    Build buy lists from 100-run frequencies.
+    Build buy lists from cross-run frequencies.
     """
     try:
         with open(saved_phase1_path, "r", encoding="utf-8") as f:
@@ -616,14 +616,15 @@ def run_phase2(saved_phase1_path: str) -> dict:
     except Exception as e:
         return {"ok": False, "error": type(e).__name__, "detail": str(e)}
 
-   seed = os.environ.get("PHASE2_SEED")
-if seed:
-    random.seed(int(seed))
+    # OPTIONAL: deterministic runs if PHASE2_SEED is set
+    seed = os.environ.get("PHASE2_SEED")
+    if seed:
+        random.seed(int(seed))
 
-    # Rebuild state
+    # Rebuild state from Phase-1 inputs
     state = rebuild_state_from_phase1(p1)
 
-    # Aggregation containers
+    # Aggregation containers (arrays of positions for the UI)
     agg = {
         "MM": {"3":[], "3B":[], "4":[], "4B":[], "5":[], "5B":[]},
         "PB": {"3":[], "3B":[], "4":[], "4B":[], "5":[], "5B":[]},
@@ -634,16 +635,16 @@ if seed:
         }
     }
 
-    # Frequency maps across 100 runs to build buy lists
+    # Frequency maps across runs (to build buy lists)
     freq_mm: Dict[int,int] = {}
     freq_pb: Dict[int,int] = {}
     freq_il: Dict[int,int] = {}
 
-    # Run 100 sims
+    # ---- THE LOOP YOU WERE LOOKING FOR ----
     for _ in range(N_PHASE2_RUNS):
         runs = _generate_batches(state)
 
-        # Tally hits (positions)
+        # Tally positions that hit for this batch
         tmp_eval = _eval_vs_target(state, runs)
         for k in ("3","3B","4","4B","5","5B"):
             agg["MM"][k] += tmp_eval["MM"][k]
@@ -652,7 +653,7 @@ if seed:
             for k in ("3","4","5","6"):
                 agg["IL"][bucket][k] += tmp_eval["IL"][bucket][k]
 
-        # Update frequency counts for main numbers
+        # Update frequency counts for buy-list construction
         for r in runs.get("MM", []):
             for n in r["mains"]:
                 freq_mm[n] = freq_mm.get(n,0) + 1
@@ -677,32 +678,35 @@ if seed:
             res += ok
         return res[:take]
 
-    buy_mm = []
     mm_sorted = sorted(freq_mm.items(), key=lambda t:(-t[1], t[0]))
+    pb_sorted = sorted(freq_pb.items(), key=lambda t:(-t[1], t[0]))
+    il_sorted = sorted(freq_il.items(), key=lambda t:(-t[1], t[0]))
+
     mm_nums = [n for (n,_) in mm_sorted]
+    pb_nums = [n for (n,_) in pb_sorted]
+    il_nums = [n for (n,_) in il_sorted]
+
+    buy_mm, buy_pb, buy_il = [], [], []
+
+    mm_bonus_list = pick_bonus(mm_bonus_pool, MM_BONUS_MAX, 10)
+    pb_bonus_list = pick_bonus(pb_bonus_pool, PB_BONUS_MAX, 10)
+
     for i in range(10):
         chunk = mm_nums[i*5:(i+1)*5]
         if len(chunk) < 5:
-            # pad random if needed
             rem = [x for x in range(1,MM_MAIN_MAX+1) if x not in chunk]
             random.shuffle(rem)
             chunk += rem[:5-len(chunk)]
-        buy_mm.append({"mains": sorted(chunk), "bonus": pick_bonus(mm_bonus_pool, MM_BONUS_MAX, 10)[i]})
+        buy_mm.append({"mains": sorted(chunk), "bonus": mm_bonus_list[i]})
 
-    buy_pb = []
-    pb_sorted = sorted(freq_pb.items(), key=lambda t:(-t[1], t[0]))
-    pb_nums = [n for (n,_) in pb_sorted]
     for i in range(10):
         chunk = pb_nums[i*5:(i+1)*5]
         if len(chunk) < 5:
             rem = [x for x in range(1,PB_MAIN_MAX+1) if x not in chunk]
             random.shuffle(rem)
             chunk += rem[:5-len(chunk)]
-        buy_pb.append({"mains": sorted(chunk), "bonus": pick_bonus(pb_bonus_pool, PB_BONUS_MAX, 10)[i]})
+        buy_pb.append({"mains": sorted(chunk), "bonus": pb_bonus_list[i]})
 
-    buy_il = []
-    il_sorted = sorted(freq_il.items(), key=lambda t:(-t[1], t[0]))
-    il_nums = [n for (n,_) in il_sorted]
     for i in range(15):
         chunk = il_nums[i*6:(i+1)*6]
         if len(chunk) < 6:
@@ -721,6 +725,7 @@ if seed:
     }
     result["saved_path"] = _save_json(result, "lotto_phase2")
     return result
+
 
 def run_phase3(saved_phase2_path: str, nwj: Optional[dict] = None) -> dict:
     """
