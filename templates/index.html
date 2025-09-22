@@ -3,357 +3,179 @@
 <head>
   <meta charset="utf-8" />
   <title>Lottery Optimizer</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    :root {
-      --bg: #fafafa;
-      --card: #fff;
-      --ink: #111;
-      --muted: #6b7280;
-      --line: #e5e7eb;
-      --blue: #2563eb;
-      --green: #16a34a;
-      --red: #dc2626;
-    }
-    html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue","Noto Sans",Arial,"Apple Color Emoji","Segoe UI Emoji";line-height:1.35}
-    h1,h2{margin:0 0 .5rem}
-    h1{font-size:1.35rem}
-    h2{font-size:1.05rem;color:var(--muted);font-weight:600}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
-    .grid{display:grid;gap:12px}
-    .grid.cols-2{grid-template-columns:1fr 1fr}
-    .grid.cols-3{grid-template-columns:repeat(3,1fr)}
-    .grid.cols-4{grid-template-columns:repeat(4,1fr)}
-    @media (max-width:980px){.grid.cols-3,.grid.cols-4{grid-template-columns:1fr}}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    label{font-size:.85rem;color:var(--muted)}
-    input[type="text"],input[type="date"],textarea{
-      width:100%;box-sizing:border-box;background:#fff;border:1px solid var(--line);border-radius:8px;
-      padding:9px 10px;font:inherit
-    }
-    textarea{min-height:110px;resize:vertical}
-    .btn{
-      appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);
-      border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit
-    }
-    .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-    .btn.ghost{background:#fff}
-    .btn.success{background:var(--green);border-color:var(--green);color:#fff}
-    .btn.warn{background:var(--red);border-color:var(--red);color:#fff}
-    .result{background:#0b1220;color:#bfe7ff;border-radius:8px;padding:10px;overflow:auto}
-    .hint{font-size:.8rem;color:var(--muted)}
-    .section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-    .pill{display:inline-block;background:#eef2ff;color:#334155;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:.75rem}
-    .tight textarea{min-height:84px}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono",Consolas,"Liberation Mono","Courier New",monospace}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:16px;color:#111}
+    h1{font-size:22px;margin:0 0 12px}
+    h2{font-size:18px;margin:20px 0 10px}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .card{flex:1 1 420px;border:1px solid #ddd;border-radius:8px;padding:12px;background:#fff}
+    .small{font-size:12px;color:#666}
+    .field{margin:8px 0}
+    label{display:block;font-size:12px;margin-bottom:4px;color:#333}
+    input[type="text"], textarea{width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-family:monospace}
+    textarea{min-height:120px;resize:vertical;white-space:pre}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    button{padding:8px 10px;border:1px solid #1b74e4;background:#1b74e4;color:#fff;border-radius:6px;cursor:pointer}
+    button.secondary{background:#fff;color:#1b74e4}
+    .mono{font-family:monospace}
+    .cols-3{display:grid;grid-template-columns:repeat(3,minmax(260px,1fr));gap:16px}
+    .error{color:#b00020}
+    .ok{color:#0a7d00}
+    .note{font-size:12px;color:#555}
+    .stack{display:flex;flex-direction:column;gap:8px}
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <h1>Lottery Optimizer</h1>
 
-    <h1>Lottery Optimizer</h1>
-
-    <!-- CSV IMPORT -->
-    <div class="card">
-      <div class="section-title">
-        <h2>Bulk import history (CSV)</h2>
-        <label class="row" style="gap:6px">
-          <input type="checkbox" id="csvOverwrite" checked />
-          Overwrite existing data
-        </label>
-      </div>
-      <form id="csvForm" class="row" action="/store/import_csv" method="POST" enctype="multipart/form-data" onsubmit="return false;">
-        <input id="csvFile" type="file" name="file" accept=".csv" required style="flex:1 1 360px" />
-        <button id="csvSubmit" class="btn">Import CSV</button>
-      </form>
-      <pre id="csvResult" class="result mono" style="margin-top:10px;"></pre>
+  <div class="card">
+    <h2>Bulk import history (CSV)</h2>
+    <div class="controls">
+      <input id="csvFile" type="file" />
+      <label class="controls" style="gap:6px"><input id="overwrite" type="checkbox" checked /> Overwrite existing data</label>
+      <button id="btnImport">Import CSV</button>
     </div>
-
-    <!-- PHASE 1 -->
-    <div class="card">
-      <div class="section-title">
-        <h2>Phase 1 — Evaluation</h2>
-        <span class="pill">The 2nd Newest jackpots — with per-game dates</span>
-      </div>
-
-      <div class="grid cols-2">
-        <!-- LEFT: MM / PB dates + preview -->
-        <div class="grid cols-1">
-          <label>Mega Millions date (MM/DD/YYYY)</label>
-          <div class="row">
-            <input id="date_MM" type="date" style="max-width:220px" />
-            <button class="btn" onclick="retrieveJackpot('MM')">Retrieve</button>
-          </div>
-          <input id="prev_MM" type="text" class="mono" placeholder="[[..mains..], bonus]" readonly />
-
-          <label style="margin-top:10px">Powerball date (MM/DD/YYYY)</label>
-          <div class="row">
-            <input id="date_PB" type="date" style="max-width:220px" />
-            <button class="btn" onclick="retrieveJackpot('PB')">Retrieve</button>
-          </div>
-          <input id="prev_PB" type="text" class="mono" placeholder="[[..mains..], bonus]" readonly />
-        </div>
-
-        <!-- RIGHT: IL date triplet + preview -->
-        <div class="grid cols-1">
-          <div class="hint" style="margin-bottom:4px">IL Lotto — select dates then <b>Retrieve</b> (bonus is <code>null</code>)</div>
-
-          <label>Jackpot date</label>
-          <div class="row">
-            <input id="date_IL_JP" type="date" style="max-width:220px" />
-            <button class="btn" onclick="retrieveJackpot('IL_JP')">Retrieve</button>
-          </div>
-          <input id="prev_IL_JP" type="text" class="mono" placeholder="[[..mains..], null]" readonly />
-
-          <label style="margin-top:10px">Million 1 date</label>
-          <div class="row">
-            <input id="date_IL_M1" type="date" style="max-width:220px" />
-            <button class="btn" onclick="retrieveJackpot('IL_M1')">Retrieve</button>
-          </div>
-          <input id="prev_IL_M1" type="text" class="mono" placeholder="[[..mains..], null]" readonly />
-
-          <label style="margin-top:10px">Million 2 date</label>
-          <div class="row">
-            <input id="date_IL_M2" type="date" style="max-width:220px" />
-            <button class="btn" onclick="retrieveJackpot('IL_M2')">Retrieve</button>
-          </div>
-          <input id="prev_IL_M2" type="text" class="mono" placeholder="[[..mains..], null]" readonly />
-        </div>
-      </div>
-
-      <!-- FEEDS -->
-      <div class="grid cols-3" style="margin-top:14px">
-        <div>
-          <label>FEED_MM</label>
-          <textarea id="feed_MM" class="mono tight" placeholder="Paste latest MM feed…"></textarea>
-        </div>
-        <div>
-          <label>FEED_PB</label>
-          <textarea id="feed_PB" class="mono tight" placeholder="Paste latest PB feed…"></textarea>
-        </div>
-        <div>
-          <label>FEED_IL</label>
-          <textarea id="feed_IL" class="mono tight" placeholder="Paste latest IL feed…"></textarea>
-        </div>
-      </div>
-
-      <!-- HISTORY BLOBS -->
-      <div class="section-title" style="margin-top:16px">
-        <h2>History blobs (top-down, newest first)</h2>
-        <span class="hint">Use the 3rd-newest date, then “Load 20”.</span>
-      </div>
-      <div class="grid cols-3">
-        <!-- MM -->
-        <div>
-          <div class="row">
-            <input id="histDate_MM" type="date" style="max-width:220px" />
-            <button class="btn" onclick="loadHistory('MM')">Load 20</button>
-          </div>
-          <textarea id="histBlob_MM" class="mono" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 MB"></textarea>
-        </div>
-
-        <!-- PB -->
-        <div>
-          <div class="row">
-            <input id="histDate_PB" type="date" style="max-width:220px" />
-            <button class="btn" onclick="loadHistory('PB')">Load 20</button>
-          </div>
-          <textarea id="histBlob_PB" class="mono" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 PB"></textarea>
-        </div>
-
-        <!-- IL JP/M1/M2 -->
-        <div>
-          <div class="hint" style="margin:0 0 6px">HIST_IL_BLOB (JP / M1 / M2)</div>
-
-          <div class="row">
-            <input id="histDate_IL_JP" type="date" style="max-width:220px" />
-            <button class="btn" onclick="loadHistory('IL_JP')">Load 20</button>
-          </div>
-          <textarea id="histBlob_IL_JP" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
-
-          <div class="row" style="margin-top:10px">
-            <input id="histDate_IL_M1" type="date" style="max-width:220px" />
-            <button class="btn" onclick="loadHistory('IL_M1')">Load 20</button>
-          </div>
-          <textarea id="histBlob_IL_M1" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
-
-          <div class="row" style="margin-top:10px">
-            <input id="histDate_IL_M2" type="date" style="max-width:220px" />
-            <button class="btn" onclick="loadHistory('IL_M2')">Load 20</button>
-          </div>
-          <textarea id="histBlob_IL_M2" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
-        </div>
-      </div>
-
-      <!-- RUN -->
-      <div class="row" style="margin-top:14px">
-        <button class="btn primary" onclick="runPhase1()">Run Phase 1</button>
-        <input id="savedPath" class="mono" type="text" placeholder="Saved Phase-1 path…" readonly style="flex:1 1 420px" />
-      </div>
-
-      <pre id="p1Result" class="result mono" style="margin-top:10px"></pre>
-    </div>
+    <pre id="importResult" class="mono"></pre>
   </div>
 
-  <script>
-    // -----------------------
-    // Helpers
-    // -----------------------
-    function prettyJSON(x){ return JSON.stringify(x,null,2); }
-    function show(el, msg){ el.textContent = msg; }
-    function get(el){ return document.getElementById(el); }
+  <div class="card">
+    <h2>Phase 1 — Evaluation</h2>
 
-    async function postCSV() {
-      const res = get('csvResult');
-      const fileInput = get('csvFile');
-      if (!fileInput.files.length) { show(res, 'Please choose a CSV file.'); return; }
-      const fd = new FormData();
-      fd.append('file', fileInput.files[0]);
-      fd.append('overwrite', get('csvOverwrite').checked ? '1' : '0');
-      res.textContent = 'Uploading…';
+    <div class="small">The 2nd Newest jackpots — with per-game dates</div>
 
-      try {
-        const r = await fetch('/store/import_csv', { method: 'POST', body: fd });
-        const t = await r.text();
-        try { show(res, prettyJSON(JSON.parse(t))); }
-        catch { show(res, t); }
-      } catch (e) {
-        show(res, `Upload failed: ${e}`);
-      }
-    }
+    <div class="row">
+      <div class="card" style="flex:1 1 480px">
+        <div class="field">
+          <label>Mega Millions date (MM/DD/YYYY)</label>
+          <input id="mmDate" type="text" placeholder="MM/DD/YYYY" />
+        </div>
+        <div class="controls">
+          <button id="btnRetrieveMM" class="secondary">Retrieve</button>
+        </div>
+        <div class="field">
+          <label>Preview mains, bonus</label>
+          <input id="mmPreview" type="text" class="mono" placeholder="[[mains...], bonus]" />
+        </div>
 
-    get('csvSubmit').addEventListener('click', postCSV);
+        <div class="field">
+          <label>Powerball date (MM/DD/YYYY)</label>
+          <input id="pbDate" type="text" placeholder="MM/DD/YYYY" />
+        </div>
+        <div class="controls">
+          <button id="btnRetrievePB" class="secondary">Retrieve</button>
+        </div>
+        <div class="field">
+          <label>Preview mains, bonus</label>
+          <input id="pbPreview" type="text" class="mono" placeholder="[[mains...], bonus]" />
+        </div>
+      </div>
 
-    // -----------------------
-    // Retrieve jackpots by date
-    // /store/get_by_date?game=MM|PB|IL_JP|IL_M1|IL_M2&date=MM/DD/YYYY
-    // -----------------------
-    async function retrieveJackpot(game){
-      const dateEl = {
-        'MM': 'date_MM',
-        'PB': 'date_PB',
-        'IL_JP': 'date_IL_JP',
-        'IL_M1': 'date_IL_M1',
-        'IL_M2': 'date_IL_M2'
-      }[game];
-      const outEl = {
-        'MM': 'prev_MM',
-        'PB': 'prev_PB',
-        'IL_JP': 'prev_IL_JP',
-        'IL_M1': 'prev_IL_M1',
-        'IL_M2': 'prev_IL_M2'
-      }[game];
+      <div class="card" style="flex:1 1 480px">
+        <div class="small">IL Lotto — select dates then “Retrieve” (bonus is null)</div>
 
-      const dt = get(dateEl).value;
-      const out = get(outEl);
-      if (!dt){ out.value = 'Pick a date first'; return; }
+        <div class="field">
+          <label>Jackpot date</label>
+          <input id="ilJPDate" type="text" placeholder="MM/DD/YYYY" />
+        </div>
+        <div class="controls">
+          <button id="btnRetrieveILJP" class="secondary">Retrieve</button>
+        </div>
+        <div class="field">
+          <label>Preview mains</label>
+          <input id="ilJPPreview" type="text" class="mono" placeholder="[[mains...], null]" />
+        </div>
 
-      try{
-        const r = await fetch(`/store/get_by_date?game=${encodeURIComponent(game)}&date=${encodeURIComponent(dt)}`);
-        if (!r.ok){
-          const txt = await r.text();
-          out.value = `Retrieve failed (${game}): ${r.status} ${txt}`;
-          return;
-        }
-        const data = await r.json();
-        // Expect: {"ok":true,"row":{"mains":[..],"bonus":N|null}}
-        const mains = data.row.mains || [];
-        const bonus = (data.row.bonus === undefined) ? null : data.row.bonus;
-        out.value = JSON.stringify([mains, bonus]);
-      }catch(e){
-        out.value = `Retrieve failed (${game}): ${e}`;
-      }
-    }
+        <div class="field">
+          <label>Million 1 date</label>
+          <input id="ilM1Date" type="text" placeholder="MM/DD/YYYY" />
+        </div>
+        <div class="controls">
+          <button id="btnRetrieveILM1" class="secondary">Retrieve</button>
+        </div>
+        <div class="field">
+          <label>Preview mains</label>
+          <input id="ilM1Preview" type="text" class="mono" placeholder="[[mains...], null]" />
+        </div>
 
-    // -----------------------
-    // Load history (20) by start date
-    // /store/get_history?game=MM|PB|IL_JP|IL_M1|IL_M2&from=MM/DD/YYYY&limit=20
-    // -----------------------
-    async function loadHistory(game){
-      const dateEl = {
-        'MM': 'histDate_MM','PB': 'histDate_PB',
-        'IL_JP': 'histDate_IL_JP','IL_M1': 'histDate_IL_M1','IL_M2': 'histDate_IL_M2'
-      }[game];
-      const outEl = {
-        'MM': 'histBlob_MM','PB':'histBlob_PB',
-        'IL_JP':'histBlob_IL_JP','IL_M1':'histBlob_IL_M1','IL_M2':'histBlob_IL_M2'
-      }[game];
+        <div class="field">
+          <label>Million 2 date</label>
+          <input id="ilM2Date" type="text" placeholder="MM/DD/YYYY" />
+        </div>
+        <div class="controls">
+          <button id="btnRetrieveILM2" class="secondary">Retrieve</button>
+        </div>
+        <div class="field">
+          <label>Preview mains</label>
+          <input id="ilM2Preview" type="text" class="mono" placeholder="[[mains...], null]" />
+        </div>
+      </div>
+    </div>
 
-      const dt = get(dateEl).value;
-      const out = get(outEl);
-      if (!dt){ out.value = 'Pick a date first'; return; }
+    <div class="row">
+      <div class="card">
+        <label>FEED_MM</label>
+        <textarea id="feedMM" placeholder="Paste latest MM feed..."></textarea>
+      </div>
+      <div class="card">
+        <label>FEED_PB</label>
+        <textarea id="feedPB" placeholder="Paste latest PB feed..."></textarea>
+      </div>
+      <div class="card">
+        <label>FEED_IL</label>
+        <textarea id="feedIL" placeholder="Paste latest IL feed..."></textarea>
+      </div>
+    </div>
 
-      try{
-        const r = await fetch(`/store/get_history?game=${encodeURIComponent(game)}&from=${encodeURIComponent(dt)}&limit=20`);
-        if (!r.ok){
-          const txt = await r.text();
-          out.value = `Load failed (${game}): ${r.status} ${txt}`;
-          return;
-        }
-        const data = await r.json();
-        // Expect: {"ok":true,"rows":[...],"blob":"..."}
-        out.value = data.blob || '';
-      }catch(e){
-        out.value = `Load failed (${game}): ${e}`;
-      }
-    }
+    <h2>History blobs (top-down, newest first)</h2>
+    <div class="cols-3">
+      <div class="card">
+        <div class="controls">
+          <input id="histMMFrom" type="text" placeholder="MM/DD/YYYY" />
+          <button id="btnLoadMM20" class="secondary">Load 20</button>
+        </div>
+        <textarea id="histMM" class="mono" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 MB"></textarea>
+      </div>
 
-    // -----------------------
-    // Build payload & Run Phase 1
-    // -----------------------
-    function parsePreview(id){
-      try { return JSON.parse(get(id).value); }
-      catch { return null; }
-    }
-    function buildPhase1Payload(){
-      const LMM = parsePreview('prev_MM');
-      const LPB = parsePreview('prev_PB');
-      const LJP = parsePreview('prev_IL_JP');
-      const LM1 = parsePreview('prev_IL_M1');
-      const LM2 = parsePreview('prev_IL_M2');
+      <div class="card">
+        <div class="controls">
+          <input id="histPBFrom" type="text" placeholder="MM/DD/YYYY" />
+          <button id="btnLoadPB20" class="secondary">Load 20</button>
+        </div>
+        <textarea id="histPB" class="mono" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 PB"></textarea>
+      </div>
 
-      return {
-        phase: "phase1",
-        LATEST_MM: LMM,
-        LATEST_PB: LPB,
-        LATEST_IL_JP: LJP,
-        LATEST_IL_M1: LM1,
-        LATEST_IL_M2: LM2,
-        FEED_MM: get('feed_MM').value || "",
-        FEED_PB: get('feed_PB').value || "",
-        FEED_IL: get('feed_IL').value || "",
-        HIST_MM_BLOB: get('histBlob_MM').value || "",
-        HIST_PB_BLOB: get('histBlob_PB').value || "",
-        HIST_IL_BLOB_JP: get('histBlob_IL_JP').value || "",
-        HIST_IL_BLOB_M1: get('histBlob_IL_M1').value || "",
-        HIST_IL_BLOB_M2: get('histBlob_IL_M2').value || ""
-      };
-    }
+      <div class="card">
+        <div class="note">Use the 3rd-newest date for each, then “Load 20”.</div>
 
-    async function runPhase1(){
-      const out = get('p1Result');
-      out.textContent = 'Running Phase 1…';
-      const payload = buildPhase1Payload();
+        <div class="controls">
+          <input id="histILJPFrom" type="text" placeholder="MM/DD/YYYY" />
+          <button id="btnLoadILJP20" class="secondary">Load 20 (JP)</button>
+        </div>
+        <textarea id="histILJP" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
 
-      try{
-        const r = await fetch('/run_json', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
-        });
-        const text = await r.text();
-        try{
-          const data = JSON.parse(text);
-          out.textContent = prettyJSON(data);
-          if (data && data.saved_path){ get('savedPath').value = data.saved_path; }
-        }catch{
-          out.textContent = text; // non-JSON response (server error HTML)
-        }
-      }catch(e){
-        out.textContent = `Phase 1 failed: ${e}`;
-      }
-    }
-  </script>
+        <div class="controls">
+          <input id="histILM1From" type="text" placeholder="MM/DD/YYYY" />
+          <button id="btnLoadILM120" class="secondary">Load 20 (M1)</button>
+        </div>
+        <textarea id="histILM1" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+
+        <div class="controls">
+          <input id="histILM2From" type="text" placeholder="MM/DD/YYYY" />
+          <button id="btnLoadILM220" class="secondary">Load 20 (M2)</button>
+        </div>
+        <textarea id="histILM2" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+      </div>
+    </div>
+
+    <div class="controls" style="margin-top:16px">
+      <button id="btnRunP1">Run Phase 1</button>
+      <input id="p1Path" class="mono" type="text" placeholder="Saved Phase-1 path…" style="flex:1" readonly />
+    </div>
+
+    <pre id="log" class="mono"></pre>
+  </div>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>
