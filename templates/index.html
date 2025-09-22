@@ -1,268 +1,189 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Lottery Optimizer</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --card:#fff; --line:#e5e7eb; --muted:#6b7280; --bg:#f7f8fb; }
-    html,body{margin:0;padding:0;background:var(--bg);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    .wrap{max-width:1160px;margin:24px auto;padding:0 16px}
-    h1{margin:0 0 12px}
-    h2{margin:24px 0 12px}
-    .row{display:flex;gap:16px;flex-wrap:wrap}
-    .col{flex:1 1 0}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
-    label{display:block;font-size:12px;color:var(--muted);margin:6px 0 4px}
-    input[type="text"],input[type="date"],textarea,select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px}
-    textarea{min-height:84px;resize:vertical;font-family:ui-monospace,Consolas,monospace}
-    button{appearance:none;border:1px solid var(--line);background:#0ea5e9;color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
-    button.ghost{background:#fff;color:#111;border-color:var(--line)}
-    .btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
-    .mini{font-size:12px;color:var(--muted)}
-    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-    .pill{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:4px 8px;background:#fff}
-    .tight{margin-top:6px}
+    :root{--bg:#fff;--panel:#fafafa;--line:#e6e6e6;--text:#222;--muted:#666;--blue:#1769ff;}
+    *{box-sizing:border-box}
+    body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--text);background:var(--bg)}
+    h1{margin:20px 20px 10px;font-size:22px}
+    h2{margin:18px 0 10px;font-size:18px}
+    .wrap{padding:0 20px 40px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+    .row{display:grid;gap:14px}
+    .row.cols-2{grid-template-columns:1fr 1fr}
+    .row.cols-3{grid-template-columns:1fr 1fr 1fr}
+    .row.cols-4{grid-template-columns:1fr 1fr 1fr 1fr}
+    .stack{display:flex;flex-direction:column;gap:8px}
+    label{font-weight:600}
+    small{color:var(--muted)}
+    input[type="text"], input[type="date"], textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+    input[readonly], textarea[readonly]{background:#f6f7fb}
+    textarea{min-height:110px;resize:vertical;white-space:pre}
+    .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
+    .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+    .btn.small{padding:6px 10px}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .grid-head{display:flex;align-items:center;justify-content:space-between}
+    .muted{color:var(--muted)}
+    .ok{color:#0a8f3c}
+    .danger{color:#b30021}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    @media (max-width:1024px){.row.cols-3,.row.cols-4{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
-<div class="wrap">
   <h1>Lottery Optimizer</h1>
+  <div class="wrap">
 
-  <!-- CSV IMPORT (works with app.py /store/import_csv) -->
-<section class="card">
-  <h2>Bulk import history (CSV)</h2>
-
-  <form id="csvForm" enctype="multipart/form-data" onsubmit="return false;">
-    <input type="file" id="csvFile" name="file" accept=".csv" />
-    <label style="margin-left:8px;">
-      <input type="checkbox" name="overwrite" value="1" checked /> Overwrite existing data
-    </label>
-    <button type="button" id="btnImportCsv">Import CSV</button>
-  </form>
-
-  <pre id="csvResult" style="background:#111; color:#8f8; padding:8px; margin-top:8px; white-space:pre-wrap;"></pre>
-</section>
-
-<script>
-  (function () {
-    const btn = document.getElementById('btnImportCsv');
-    const fileInput = document.getElementById('csvFile');
-    const result = document.getElementById('csvResult');
-
-    btn.addEventListener('click', async () => {
-      const f = fileInput.files[0];
-      if (!f) {
-        alert('Choose a CSV file first.');
-        return;
-      }
-      const fd = new FormData();
-      fd.append('file', f); // <<< field name MUST be "file"
-
-      // include overwrite if checked
-      const ow = document.querySelector('#csvForm input[name="overwrite"]').checked;
-      if (ow) fd.append('overwrite', '1');
-
-      result.textContent = 'Uploading…';
-      try {
-        const resp = await fetch('/store/import_csv', {
-          method: 'POST',
-          body: fd
-        });
-
-        const text = await resp.text();
-        // Show raw text if server didn’t return JSON (useful for 404/debug)
-        try {
-          const data = JSON.parse(text);
-          result.textContent = JSON.stringify(data, null, 2);
-        } catch {
-          result.textContent = text;
-        }
-      } catch (err) {
-        result.textContent = 'Network error: ' + (err?.message || err);
-      }
-    });
-  })();
-</script>
-
-  <!-- Phase 1 -->
-  <div class="card">
-    <h2>Phase 1 — Evaluation</h2>
-    <div class="mini">The 2nd Newest jackpots — with per-game dates</div>
-
-    <div class="grid2">
-      <div class="col">
-        <div class="card">
-          <label>Mega Millions date (MM/DD/YYYY)</label>
-          <input type="date" id="date_mm" />
-          <label class="tight">Preview mains, bonus</label>
-          <input type="text" id="prev_mm" placeholder="[[mains...], bonus]" />
-          <div class="btnrow">
-            <button class="ghost" id="btn_mm_fetch">Retrieve</button>
-          </div>
-
-          <label class="tight">Powerball date (MM/DD/YYYY)</label>
-          <input type="date" id="date_pb" />
-          <label class="tight">Preview mains, bonus</label>
-          <input type="text" id="prev_pb" placeholder="[[mains...], bonus]" />
-          <div class="btnrow">
-            <button class="ghost" id="btn_pb_fetch">Retrieve</button>
-          </div>
-        </div>
-
-        <div class="card tight">
-          <div class="mini">Feeds (Lottery Defeated)</div>
-          <div class="grid3">
-            <div>
-              <label>FEED_MM</label>
-              <textarea id="FEED_MM" placeholder="Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Mega Ball numbers: ...&#10;Top 3 overdue Mega Ball numbers: ..."></textarea>
-            </div>
-            <div>
-              <label>FEED_PB</label>
-              <textarea id="FEED_PB" placeholder="Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Power Ball numbers: ...&#10;Top 3 overdue Power Ball numbers: ..."></textarea>
-            </div>
-            <div>
-              <label>FEED_IL</label>
-              <textarea id="FEED_IL" placeholder="Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ..."></textarea>
-            </div>
-          </div>
+    <!-- CSV IMPORT -->
+    <div class="card stack">
+      <div class="grid-head">
+        <h2>Bulk import history (CSV)</h2>
+        <div class="muted">Overwrite existing data
+          <input id="csv_overwrite" type="checkbox" checked>
         </div>
       </div>
-
-      <div class="col">
-        <div class="card">
-          <div class="mini pill">IL Lotto — select dates then “Retrieve”</div>
-
-          <label class="tight">Jackpot date</label>
-          <input type="date" id="date_il_jp" />
-          <label class="tight">Preview mains</label>
-          <input type="text" id="prev_il_jp" placeholder="[[mains...], null]" />
-          <div class="btnrow">
-            <button class="ghost" id="btn_il_jp_fetch">Retrieve</button>
-          </div>
-
-          <label class="tight">Million 1 date</label>
-          <input type="date" id="date_il_m1" />
-          <label class="tight">Preview mains</label>
-          <input type="text" id="prev_il_m1" placeholder="[[mains...], null]" />
-          <div class="btnrow">
-            <button class="ghost" id="btn_il_m1_fetch">Retrieve</button>
-          </div>
-
-          <label class="tight">Million 2 date</label>
-          <input type="date" id="date_il_m2" />
-          <label class="tight">Preview mains</label>
-          <input type="text" id="prev_il_m2" placeholder="[[mains...], null]" />
-          <div class="btnrow">
-            <button class="ghost" id="btn_il_m2_fetch">Retrieve</button>
-          </div>
-        </div>
+      <div class="row cols-4" style="grid-template-columns: 2fr auto auto 1fr;">
+        <input id="csv_file" type="file" accept=".csv"/>
+        <button id="csv_import" class="btn">Import CSV</button>
+        <div></div>
+        <pre id="csv_result" class="mono" style="margin:0;height:70px;overflow:auto;background:#0b1020;color:#cde; padding:10px;border-radius:8px"></pre>
       </div>
     </div>
 
-    <div class="btnrow">
-      <button id="run_phase1">Run Phase 1</button>
-      <button class="ghost" id="btn_copy_p1">Copy saved path</button>
-      <button class="ghost" id="btn_save_nj">Save current NJ → History</button>
-    </div>
-
-    <div class="grid3 tight">
-      <div class="card">
-        <div class="mini">HIST_MM_BLOB</div>
-        <div class="btnrow">
-          <input type="date" id="mm_hist_date" />
-          <button class="ghost" id="btn_mm_load20">Load 20</button>
+    <!-- PHASE 1 -->
+    <h2 style="margin-top:24px">Phase 1 — Evaluation</h2>
+    <div class="row cols-2">
+      <div class="card stack">
+        <div class="grid-head">
+          <h3 style="margin:0">The 2nd Newest jackpots — with per-game dates</h3>
+          <small class="muted">Format preview: <span class="mono">[[mains…], bonus]</span>, <span class="mono">bonus=null</span> for IL</small>
         </div>
-        <textarea id="HIST_MM_BLOB" placeholder="mm-dd-mm-dd-mm-dd mm"></textarea>
+
+        <!-- Left column: MM / PB -->
+        <div class="row cols-2">
+          <div class="stack">
+            <label>Mega Millions date (MM/DD/YYYY)</label>
+            <input id="date_mm" type="date"/>
+            <input id="mm_preview" type="text" placeholder="[[..mains..], bonus]" readonly/>
+            <button id="btn_get_mm" class="btn small">Retrieve</button>
+          </div>
+
+          <div class="stack">
+            <label>Powerball date (MM/DD/YYYY)</label>
+            <input id="date_pb" type="date"/>
+            <input id="pb_preview" type="text" placeholder="[[..mains..], bonus]" readonly/>
+            <button id="btn_get_pb" class="btn small">Retrieve</button>
+          </div>
+        </div>
+
+        <!-- Right column: IL (3 sections) -->
+        <div class="card stack" style="padding:10px; background:#fff">
+          <div class="muted" style="font-weight:600">IL Lotto — select dates then “Retrieve”</div>
+
+          <div class="row cols-3">
+            <div class="stack">
+              <label>Jackpot date</label>
+              <input id="date_il_jp" type="date"/>
+              <input id="il_jp_preview" type="text" placeholder="[[..mains..], null]" readonly/>
+              <button id="btn_get_il_jp" class="btn small">Retrieve</button>
+            </div>
+
+            <div class="stack">
+              <label>Million 1 date</label>
+              <input id="date_il_m1" type="date"/>
+              <input id="il_m1_preview" type="text" placeholder="[[..mains..], null]" readonly/>
+              <button id="btn_get_il_m1" class="btn small">Retrieve</button>
+            </div>
+
+            <div class="stack">
+              <label>Million 2 date</label>
+              <input id="date_il_m2" type="date"/>
+              <input id="il_m2_preview" type="text" placeholder="[[..mains..], null]" readonly/>
+              <button id="btn_get_il_m2" class="btn small">Retrieve</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feeds -->
+        <div class="grid-head">
+          <h3 style="margin:0">Feeds (Lottery Defeated)</h3>
+          <small class="muted">Paste latest feeds when you run</small>
+        </div>
+        <div class="row cols-3">
+          <textarea id="feed_mm" placeholder="FEED_MM&#10;Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Mega Ball numbers: ...&#10;Top 3 overdue Mega Ball numbers: ..."></textarea>
+          <textarea id="feed_pb" placeholder="FEED_PB&#10;Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Power Ball numbers: ...&#10;Top 3 overdue Power Ball numbers: ..."></textarea>
+          <textarea id="feed_il" placeholder="FEED_IL&#10;Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ..."></textarea>
+        </div>
+
+        <!-- Run & status -->
+        <div class="row cols-3" style="align-items:center">
+          <button id="btn_run_phase1" class="btn primary">Run Phase 1</button>
+          <input id="phase1_saved_path" type="text" placeholder="Saved Phase-1 path…" readonly/>
+          <div id="phase1_msg" class="muted"></div>
+        </div>
       </div>
-      <div class="card">
-        <div class="mini">HIST_PB_BLOB</div>
-        <div class="btnrow">
-          <input type="date" id="pb_hist_date" />
-          <button class="ghost" id="btn_pb_load20">Load 20</button>
+
+      <!-- History blocks -->
+      <div class="card stack">
+        <div class="grid-head">
+          <h3 style="margin:0">History blobs (top-down, newest first)</h3>
+          <small class="muted">Use the 3rd-newest date, then “Load 20 from that date”.</small>
         </div>
-        <textarea id="HIST_PB_BLOB"></textarea>
+
+        <div class="row cols-3">
+          <div class="stack">
+            <label>HIST_MM_BLOB</label>
+            <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
+              <input id="date_hist_mm" type="date"/>
+              <button id="btn_load20_mm" class="btn small">Load 20</button>
+            </div>
+            <textarea id="hist_mm_blob" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 MB"></textarea>
+          </div>
+
+          <div class="stack">
+            <label>HIST_PB_BLOB</label>
+            <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
+              <input id="date_hist_pb" type="date"/>
+              <button id="btn_load20_pb" class="btn small">Load 20</button>
+            </div>
+            <textarea id="hist_pb_blob" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 PB"></textarea>
+          </div>
+
+          <div class="stack">
+            <label>HIST_IL_BLOB (JP / M1 / M2)</label>
+
+            <div class="stack" style="gap:6px">
+              <small class="muted">JP</small>
+              <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
+                <input id="date_hist_il_jp" type="date"/>
+                <button id="btn_load20_il_jp" class="btn small">Load 20</button>
+              </div>
+              <textarea id="hist_il_blob_jp" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+
+              <small class="muted" style="margin-top:6px">M1</small>
+              <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
+                <input id="date_hist_il_m1" type="date"/>
+                <button id="btn_load20_il_m1" class="btn small">Load 20</button>
+              </div>
+              <textarea id="hist_il_blob_m1" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+
+              <small class="muted" style="margin-top:6px">M2</small>
+              <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
+                <input id="date_hist_il_m2" type="date"/>
+                <button id="btn_load20_il_m2" class="btn small">Load 20</button>
+              </div>
+              <textarea id="hist_il_blob_m2" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="card">
-        <div class="mini">HIST_IL_BLOB (JP / M1 / M2)</div>
-        <div class="btnrow">
-          <input type="date" id="il_jp_hist_date" />
-          <button class="ghost" id="btn_iljp_load20">Load 20</button>
-        </div>
-        <textarea id="HIST_IL_JP_BLOB"></textarea>
+    </div><!-- /row -->
+  </div><!-- /wrap -->
 
-        <div class="btnrow">
-          <input type="date" id="il_m1_hist_date" />
-          <button class="ghost" id="btn_ilm1_load20">Load 20</button>
-        </div>
-        <textarea id="HIST_IL_M1_BLOB"></textarea>
-
-        <div class="btnrow">
-          <input type="date" id="il_m2_hist_date" />
-          <button class="ghost" id="btn_ilm2_load20">Load 20</button>
-        </div>
-        <textarea id="HIST_IL_M2_BLOB"></textarea>
-      </div>
-    </div>
-  </div>
-
-  <!-- Phase 2 & 3 placeholders (your existing rendering will fill these) -->
-  <div class="card">
-    <h2>Phase 2 — Prediction</h2>
-    <div id="phase2_box" class="mini">Use your existing code to render results here.</div>
-  </div>
-
-  <div class="card">
-    <h2>Phase 3 — Confirmation</h2>
-    <div class="mini">The 1st Newest jackpots — with per-game dates</div>
-    <div id="phase3_box" class="mini">Use your existing confirmation section here.</div>
-  </div>
-
-</div>
-
-<!-- Your app.js (contains upload + loader calls) -->
-<script src="/static/app.js"></script>
-
-<!-- Minimal wiring for the Retrieve / Load buttons using the same store routes -->
-<script>
-async function fetchOne(game, dateInputId, previewInputId){
-  const d = document.getElementById(dateInputId).value;
-  if(!d){ alert("Pick a date"); return; }
-  // convert yyyy-mm-dd (from <input type="date">) -> mm/dd/yyyy
-  const [Y,M,D] = d.split("-");
-  const md = `${M}/${D}/${Y}`;
-  const r = await fetch(`/store/get_by_date?game=${encodeURIComponent(game)}&date=${encodeURIComponent(md)}`);
-  const j = await r.json();
-  document.getElementById(previewInputId).value = j?.row ? JSON.stringify([j.row.mains, j.row.bonus ?? null]) : "";
-}
-
-async function load20(game, dateInputId, blobId){
-  const d = document.getElementById(dateInputId).value;
-  if(!d){ alert("Pick a date"); return; }
-  const [Y,M,D] = d.split("-");
-  const md = `${M}/${D}/${Y}`;
-  const r = await fetch(`/store/get_history?game=${encodeURIComponent(game)}&from=${encodeURIComponent(md)}&limit=20`);
-  const j = await r.json();
-  document.getElementById(blobId).value = j.blob || "";
-}
-
-// Retrieve buttons
-document.getElementById("btn_mm_fetch").onclick   = () => fetchOne("MM",   "date_mm",     "prev_mm");
-document.getElementById("btn_pb_fetch").onclick   = () => fetchOne("PB",   "date_pb",     "prev_pb");
-document.getElementById("btn_il_jp_fetch").onclick= () => fetchOne("IL_JP","date_il_jp",  "prev_il_jp");
-document.getElementById("btn_il_m1_fetch").onclick= () => fetchOne("IL_M1","date_il_m1",  "prev_il_m1");
-document.getElementById("btn_il_m2_fetch").onclick= () => fetchOne("IL_M2","date_il_m2",  "prev_il_m2");
-
-// Load 20 buttons
-document.getElementById("btn_mm_load20").onclick   = () => load20("MM",   "mm_hist_date",  "HIST_MM_BLOB");
-document.getElementById("btn_pb_load20").onclick   = () => load20("PB",   "pb_hist_date",  "HIST_PB_BLOB");
-document.getElementById("btn_iljp_load20").onclick = () => load20("IL_JP","il_jp_hist_date","HIST_IL_JP_BLOB");
-document.getElementById("btn_ilm1_load20").onclick = () => load20("IL_M1","il_m1_hist_date","HIST_IL_M1_BLOB");
-document.getElementById("btn_ilm2_load20").onclick = () => load20("IL_M2","il_m2_hist_date","HIST_IL_M2_BLOB");
-
-// Phase-1 run: wire to your existing /run_json post if needed.
-// document.getElementById("run_phase1").onclick = () => { ... }
-</script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
