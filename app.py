@@ -49,19 +49,26 @@ def static_files(filename: str):
 def store_import_csv():
     if not STORE_OK:
         return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-
-    f = request.files.get("file")
-    if not f:
-        return jsonify({"ok": False, "error": "no_file"}), 400
-
-    overwrite = request.form.get("overwrite", "false").lower() in ("1", "true", "yes", "on")
-    text = f.read().decode("utf-8", errors="replace")
     try:
-        stats = store.import_csv(text, overwrite=overwrite)
-        return jsonify({"ok": True, **stats})
-    except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+        # MUST read the file from request.files, not request.form
+        f = request.files.get("file")
+        if not f:
+            return jsonify({"ok": False, "error": "no_file", "detail": "multipart field 'file' is missing"}), 400
 
+        overwrite = request.form.get("overwrite", "false").lower() in ("1", "true", "yes", "on")
+
+        # Read bytes → decode → wrap in StringIO so the parser can read like a file
+        import io
+        raw = f.read()
+        text = raw.decode("utf-8-sig", errors="ignore")  # tolerate BOM and weird newlines
+        buf = io.StringIO(text)
+
+        # IMPORTANT: call a parser that accepts a file-like object
+        stats = store.import_csv_io(buf, overwrite=overwrite)
+        return jsonify(stats), (200 if stats.get("ok") else 400)
+    except Exception as e:
+        import traceback
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": "".join(traceback.format_exc())}), 500
 
 @app.get("/store/get_by_date")
 def store_get_by_date():
