@@ -1,206 +1,144 @@
-/* global fetch */
-(function () {
-  const $  = (s) => document.querySelector(s);
-  const val = (s) => (document.querySelector(s)?.value || "").trim();
+/* ------------------------------
+   Lottery Optimizer – Phase 1 UI
+   (safe date handling: never use new Date())
+--------------------------------*/
 
-  // ---------- helpers ----------
-  function setMsg(text, isErr=false) {
-    const el = $("#phase1_msg");
-    if (!el) return;
-    el.textContent = text || "";
-    el.classList.toggle("danger", !!isErr);
-    el.classList.toggle("muted", !isErr);
-  }
-  function fmtPreview(row) {
-    // row from /store/get_by_date → {mains:[...], bonus: int|null}
-    if (!row || !Array.isArray(row.mains)) return "";
-    const bonus = (row.bonus === null || row.bonus === undefined) ? "null" : row.bonus;
-    return `[${JSON.stringify(row.mains)}, ${bonus}]`;
-  }
-  function toMMDDYYYY(htmlDateValue) {
-    // htmlDateValue is yyyy-mm-dd
-    const d = new Date(htmlDateValue);
-    if (isNaN(d)) return "";
-    const mm = String(d.getMonth()+1).padStart(2,"0");
-    const dd = String(d.getDate()).padStart(2,"0");
-    const yyyy = d.getFullYear();
-    return `${mm}/${dd}/${yyyy}`;
-  }
-  function toM_D_YYYY(mmddyyyy) {
-    // turn "09/16/2025" into "9/16/2025"
-    const [mm, dd, yyyy] = mmddyyyy.split("/");
-    const m = String(parseInt(mm,10));
-    const d = String(parseInt(dd,10));
-    return `${m}/${d}/${yyyy}`;
-  }
-  function qDate(sel) {
-    const el = $(sel);
-    if (!el || !el.value) return {mmddyyyy:"", mdyyyy:""};
-    const mmddyyyy = toMMDDYYYY(el.value);
-    return { mmddyyyy, mdyyyy: toM_D_YYYY(mmddyyyy) };
-  }
-  async function getJSON(url) {
+(() => {
+  // ----- helpers -----
+  const $ = (sel) => document.querySelector(sel);
+  const setVal = (sel, v) => { const n = $(sel); if (n) n.value = v; };
+  const getStr = (sel) => {
+    const n = $(sel);
+    return (n && typeof n.value === 'string') ? n.value.trim() : '';
+  };
+  const msg = (t, kind = 'info') => {
+    const m = $('#phase1_msg');
+    if (!m) return;
+    m.textContent = t || '';
+    m.className = kind; // style with .info, .warn, .err if you like
+  };
+  const fetchJSON = async (url) => {
     const r = await fetch(url);
-    // if 404: we still return JSON attempt; caller will handle
-    if (r.status === 404) return {__404:true, raw: await r.text()};
-    const data = await r.json();
     if (!r.ok) {
-      const msg = data?.detail || data?.error || `${r.status} ${r.statusText}`;
-      throw new Error(msg);
+      const text = await r.text();
+      throw new Error(`${r.status} ${r.statusText}: ${text}`);
     }
-    return data;
-  }
+    return r.json();
+  };
 
-  // ---------- CSV import ----------
-  const importBtn = $("#csv_import");
-  if (importBtn) {
-    importBtn.addEventListener("click", async () => {
-      const file = $("#csv_file")?.files?.[0];
-      if (!file) { $("#csv_result").textContent = "Choose a CSV first."; return; }
-      const overwrite = $("#csv_overwrite").checked;
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("overwrite", overwrite ? "true" : "false");
-      $("#csv_result").textContent = "Uploading…";
-      try {
-        const res = await fetch("/store/import_csv", { method:"POST", body: fd });
-        const data = await res.json();
-        $("#csv_result").textContent = JSON.stringify(data, null, 2);
-      } catch (e) {
-        $("#csv_result").textContent = String(e);
-      }
-    });
-  }
+  // ----- element IDs (adjust here if yours differ) -----
+  const el = {
+    // date inputs
+    mmDate:     '#mm_date',
+    pbDate:     '#pb_date',
+    ilJPDate:   '#il_jp_date',
+    ilM1Date:   '#il_m1_date',
+    ilM2Date:   '#il_m2_date',
 
-  // ---------- Retrieve buttons (with fallbacks) ----------
-  async function retrieve(gameKey, dateSel, previewSel) {
-    const {mmddyyyy, mdyyyy} = qDate(dateSel);
-    if (!mmddyyyy) { setMsg("Select a date first.", true); return; }
+    // preview outputs
+    mmPreview:  '#mm_preview',
+    pbPreview:  '#pb_preview',
+    ilJPPrev:   '#il_jp_preview',
+    ilM1Prev:   '#il_m1_preview',
+    ilM2Prev:   '#il_m2_preview',
 
-    // Build candidate URLs in order we want to try
-    const urls = [];
+    // retrieve buttons
+    mmBtn:      '#btn_mm_retrieve',
+    pbBtn:      '#btn_pb_retrieve',
+    ilJPBtn:    '#btn_il_jp_retrieve',
+    ilM1Btn:    '#btn_il_m1_retrieve',
+    ilM2Btn:    '#btn_il_m2_retrieve',
 
-    // 1) compact game keys (MM, PB, IL_JP, IL_M1, IL_M2)
-    urls.push(`/store/get_by_date?game=${encodeURIComponent(gameKey)}&date=${encodeURIComponent(mmddyyyy)}`);
-    urls.push(`/store/get_by_date?game=${encodeURIComponent(gameKey)}&date=${encodeURIComponent(mdyyyy)}`);
+    // history blocks
+    mmHistDate: '#hist_mm_date',
+    pbHistDate: '#hist_pb_date',
+    ilJPHDate:  '#hist_il_jp_date',
+    ilM1HDate:  '#hist_il_m1_date',
+    ilM2HDate:  '#hist_il_m2_date',
 
-    // 2) IL split form (game=IL&tier=JP/M1/M2)
-    if (gameKey.startsWith("IL_")) {
-      const tier = gameKey.split("_")[1]; // JP/M1/M2
-      urls.push(`/store/get_by_date?game=IL&tier=${encodeURIComponent(tier)}&date=${encodeURIComponent(mmddyyyy)}`);
-      urls.push(`/store/get_by_date?game=IL&tier=${encodeURIComponent(tier)}&date=${encodeURIComponent(mdyyyy)}`);
-    }
+    mmHistLoad: '#btn_hist_mm_load',
+    pbHistLoad: '#btn_hist_pb_load',
+    ilJPHLoad:  '#btn_hist_il_jp_load',
+    ilM1HLoad:  '#btn_hist_il_m1_load',
+    ilM2HLoad:  '#btn_hist_il_m2_load',
 
-    let last404 = null, lastErr = null;
-    for (const u of urls) {
-      try {
-        const data = await getJSON(u);
-        if (data.__404) { last404 = u; continue; }
-        if (!data.ok) { lastErr = data.detail || data.error || "not ok"; continue; }
-        const prev = fmtPreview(data.row);
-        if (!prev) { lastErr = "No data returned"; continue; }
-        $(previewSel).value = `[${prev}]`; // match prior UI: [[mains], bonus]
-        setMsg("");
-        return;
-      } catch (e) {
-        lastErr = e.message;
-      }
-    }
-    setMsg(`Retrieve failed (${gameKey}): ${lastErr || "404 not found"}${last404 ? " — " + last404 : ""}`, true);
-  }
+    mmHistBlob: '#hist_mm_blob',
+    pbHistBlob: '#hist_pb_blob',
+    ilJPHBlob:  '#hist_il_jp_blob',
+    ilM1HBlob:  '#hist_il_m1_blob',
+    ilM2HBlob:  '#hist_il_m2_blob',
+  };
 
-  $("#btn_get_mm")?.addEventListener("click", () => retrieve("MM", "#date_mm", "#mm_preview"));
-  $("#btn_get_pb")?.addEventListener("click", () => retrieve("PB", "#date_pb", "#pb_preview"));
-  $("#btn_get_il_jp")?.addEventListener("click", () => retrieve("IL_JP", "#date_il_jp", "#il_jp_preview"));
-  $("#btn_get_il_m1")?.addEventListener("click", () => retrieve("IL_M1", "#date_il_m1", "#il_m1_preview"));
-  $("#btn_get_il_m2")?.addEventListener("click", () => retrieve("IL_M2", "#date_il_m2", "#il_m2_preview"));
-
-  // ---------- Load 20 history (with date format fallback) ----------
-  async function load20(gameKey, fromSel, blobSel) {
-    const {mmddyyyy, mdyyyy} = qDate(fromSel);
-    if (!mmddyyyy) { setMsg("Pick a history start date (3rd newest).", true); return; }
-
-    const urls = [];
-
-    // compact game keys
-    urls.push(`/store/get_history?game=${encodeURIComponent(gameKey)}&from=${encodeURIComponent(mmddyyyy)}&limit=20`);
-    urls.push(`/store/get_history?game=${encodeURIComponent(gameKey)}&from=${encodeURIComponent(mdyyyy)}&limit=20`);
-
-    // IL split form
-    if (gameKey.startsWith("IL_")) {
-      const tier = gameKey.split("_")[1];
-      urls.push(`/store/get_history?game=IL&tier=${encodeURIComponent(tier)}&from=${encodeURIComponent(mmddyyyy)}&limit=20`);
-      urls.push(`/store/get_history?game=IL&tier=${encodeURIComponent(tier)}&from=${encodeURIComponent(mdyyyy)}&limit=20`);
-    }
-
-    let last404 = null, lastErr = null;
-    for (const u of urls) {
-      try {
-        const data = await getJSON(u);
-        if (data.__404) { last404 = u; continue; }
-        if (!data.ok) { lastErr = data.detail || data.error || "not ok"; continue; }
-        $(blobSel).value = (data.blob || (data.rows?.join("\n") || "")).trim();
-        setMsg("");
-        return;
-      } catch (e) {
-        lastErr = e.message;
-      }
-    }
-    setMsg(`Load 20 failed (${gameKey}): ${lastErr || "404 not found"}${last404 ? " — " + last404 : ""}`, true);
-  }
-
-  $("#btn_load20_mm")?.addEventListener("click", () => load20("MM",   "#date_hist_mm",   "#hist_mm_blob"));
-  $("#btn_load20_pb")?.addEventListener("click", () => load20("PB",   "#date_hist_pb",   "#hist_pb_blob"));
-  $("#btn_load20_il_jp")?.addEventListener("click", () => load20("IL_JP", "#date_hist_il_jp", "#hist_il_blob_jp"));
-  $("#btn_load20_il_m1")?.addEventListener("click", () => load20("IL_M1", "#date_hist_il_m1", "#hist_il_blob_m1"));
-  $("#btn_load20_il_m2")?.addEventListener("click", () => load20("IL_M2", "#date_hist_il_m2", "#hist_il_blob_m2"));
-
-  // ---------- Run Phase 1 ----------
-  $("#btn_run_phase1")?.addEventListener("click", async () => {
-    setMsg("");
-    const LATEST_MM    = val("#mm_preview");
-    const LATEST_PB    = val("#pb_preview");
-    const LATEST_IL_JP = val("#il_jp_preview");
-    const LATEST_IL_M1 = val("#il_m1_preview");
-    const LATEST_IL_M2 = val("#il_m2_preview");
-
-    if (!LATEST_MM || !LATEST_PB || !LATEST_IL_JP || !LATEST_IL_M1 || !LATEST_IL_M2) {
-      setMsg("Pick dates and click Retrieve for all five games first.", true);
-      return;
-    }
-
-    const payload = {
-      LATEST_MM, LATEST_PB, LATEST_IL_JP, LATEST_IL_M1, LATEST_IL_M2,
-      FEED_MM: val("#feed_mm"),
-      FEED_PB: val("#feed_pb"),
-      FEED_IL: val("#feed_il"),
-      HIST_MM_BLOB: val("#hist_mm_blob"),
-      HIST_PB_BLOB: val("#hist_pb_blob"),
-      HIST_IL_BLOB: [val("#hist_il_blob_jp"), val("#hist_il_blob_m1"), val("#hist_il_blob_m2")].filter(Boolean).join("\n")
-    };
-
-    const btn = $("#btn_run_phase1");
-    btn.disabled = true; document.body.style.cursor = "wait";
-
+  // ----- wire up “Retrieve” for MM/PB -----
+  const retrieveMM = async () => {
     try {
-      const r = await fetch("/run_json", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
-      const data = await r.json();
-      if (!r.ok || data.ok === false) {
-        setMsg(`Phase 1 failed: ${data.detail || data.error || (r.status + " " + r.statusText)}`, true);
-        return;
-      }
-      const path = data.saved_path || "";
-      if ($("#phase1_saved_path")) $("#phase1_saved_path").value = path;
-      setMsg("Phase 1 completed. Saved state ready for Phase 2.");
-    } catch (e) {
-      setMsg(`Network/parse error: ${e.message}`, true);
-    } finally {
-      btn.disabled = false; document.body.style.cursor = "default";
-    }
-  });
+      msg('');
+      const date = getStr(el.mmDate);         // <-- raw string (MM/DD/YYYY)
+      if (!date) throw new Error('Pick Mega Millions date.');
+      const q = `/store/get_by_date?game=MM&date=${encodeURIComponent(date)}`;
+      const j = await fetchJSON(q);
+      // store returns: { ok:true, row:{ mains:[...], bonus:number|null, ... } }
+      const mains = j.row.mains || [];
+      const bonus = (j.row.bonus === null || j.row.bonus === undefined) ? 'null' : j.row.bonus;
+      setVal(el.mmPreview, `[${mains.join(',')}], ${bonus}`);
+    } catch (e) { msg(`Retrieve failed (MM): ${e.message}`, 'err'); }
+  };
 
+  const retrievePB = async () => {
+    try {
+      msg('');
+      const date = getStr(el.pbDate);
+      if (!date) throw new Error('Pick Powerball date.');
+      const q = `/store/get_by_date?game=PB&date=${encodeURIComponent(date)}`;
+      const j = await fetchJSON(q);
+      const mains = j.row.mains || [];
+      const bonus = (j.row.bonus === null || j.row.bonus === undefined) ? 'null' : j.row.bonus;
+      setVal(el.pbPreview, `[${mains.join(',')}], ${bonus}`);
+    } catch (e) { msg(`Retrieve failed (PB): ${e.message}`, 'err'); }
+  };
+
+  // ----- wire up “Retrieve” for IL tiers -----
+  const retrieveIL = (tier, dateSel, outSel, label) => async () => {
+    try {
+      msg('');
+      const date = getStr(dateSel);
+      if (!date) throw new Error(`Pick ${label} date.`);
+      const q = `/store/get_by_date?game=IL&tier=${encodeURIComponent(tier)}&date=${encodeURIComponent(date)}`;
+      const j = await fetchJSON(q);
+      const mains = j.row.mains || [];
+      // IL tiers have no bonus → use null
+      setVal(outSel, `[${mains.join(',')}], null`);
+    } catch (e) { msg(`Retrieve failed (${label}): ${e.message}`, 'err'); }
+  };
+
+  // ----- history “Load 20” for blobs -----
+  const loadHist = (game, dateSel, outSel, extraParams = '') => async () => {
+    try {
+      msg('');
+      const from = getStr(dateSel);
+      if (!from) throw new Error('Pick a start date (3rd newest).');
+      const q = `/store/get_history?game=${encodeURIComponent(game)}&from=${encodeURIComponent(from)}&limit=20${extraParams}`;
+      const j = await fetchJSON(q);
+      // Expect j.blob to be the formatted multi-line text
+      setVal(outSel, j.blob || '');
+    } catch (e) { msg(`Load 20 failed (${game}): ${e.message}`, 'err'); }
+  };
+
+  // ----- attach listeners -----
+  const on = (sel, fn) => { const n = $(sel); if (n) n.addEventListener('click', fn); };
+
+  on(el.mmBtn, retrieveMM);
+  on(el.pbBtn, retrievePB);
+  on(el.ilJPBtn, retrieveIL('JP', el.ilJPDate, el.ilJPPrev, 'IL JP'));
+  on(el.ilM1Btn, retrieveIL('M1', el.ilM1Date, el.ilM1Prev, 'IL M1'));
+  on(el.ilM2Btn, retrieveIL('M2', el.ilM2Date, el.ilM2Prev, 'IL M2'));
+
+  on(el.mmHistLoad, loadHist('MM', el.mmHistDate, el.mmHistBlob));
+  on(el.pbHistLoad, loadHist('PB', el.pbHistDate, el.pbHistBlob));
+  on(el.ilJPHLoad,  loadHist('IL_JP', el.ilJPHDate, el.ilJPHBlob));
+  on(el.ilM1HLoad,  loadHist('IL_M1', el.ilM1HDate, el.ilM1HBlob));
+  on(el.ilM2HLoad,  loadHist('IL_M2', el.ilM2HDate, el.ilM2HBlob));
+
+  // ready
+  msg('');
 })();
