@@ -1,189 +1,359 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8" />
   <title>Lottery Optimizer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root{--bg:#fff;--panel:#fafafa;--line:#e6e6e6;--text:#222;--muted:#666;--blue:#1769ff;}
-    *{box-sizing:border-box}
-    body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--text);background:var(--bg)}
-    h1{margin:20px 20px 10px;font-size:22px}
-    h2{margin:18px 0 10px;font-size:18px}
-    .wrap{padding:0 20px 40px}
-    .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
-    .row{display:grid;gap:14px}
-    .row.cols-2{grid-template-columns:1fr 1fr}
-    .row.cols-3{grid-template-columns:1fr 1fr 1fr}
-    .row.cols-4{grid-template-columns:1fr 1fr 1fr 1fr}
-    .stack{display:flex;flex-direction:column;gap:8px}
-    label{font-weight:600}
-    small{color:var(--muted)}
-    input[type="text"], input[type="date"], textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff}
-    input[readonly], textarea[readonly]{background:#f6f7fb}
-    textarea{min-height:110px;resize:vertical;white-space:pre}
-    .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
+    :root {
+      --bg: #fafafa;
+      --card: #fff;
+      --ink: #111;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --blue: #2563eb;
+      --green: #16a34a;
+      --red: #dc2626;
+    }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue","Noto Sans",Arial,"Apple Color Emoji","Segoe UI Emoji";line-height:1.35}
+    h1,h2{margin:0 0 .5rem}
+    h1{font-size:1.35rem}
+    h2{font-size:1.05rem;color:var(--muted);font-weight:600}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    .grid{display:grid;gap:12px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    .grid.cols-3{grid-template-columns:repeat(3,1fr)}
+    .grid.cols-4{grid-template-columns:repeat(4,1fr)}
+    @media (max-width:980px){.grid.cols-3,.grid.cols-4{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    label{font-size:.85rem;color:var(--muted)}
+    input[type="text"],input[type="date"],textarea{
+      width:100%;box-sizing:border-box;background:#fff;border:1px solid var(--line);border-radius:8px;
+      padding:9px 10px;font:inherit
+    }
+    textarea{min-height:110px;resize:vertical}
+    .btn{
+      appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);
+      border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit
+    }
     .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-    .btn.small{padding:6px 10px}
-    .btn:disabled{opacity:.6;cursor:not-allowed}
-    .grid-head{display:flex;align-items:center;justify-content:space-between}
-    .muted{color:var(--muted)}
-    .ok{color:#0a8f3c}
-    .danger{color:#b30021}
-    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
-    @media (max-width:1024px){.row.cols-3,.row.cols-4{grid-template-columns:1fr}}
+    .btn.ghost{background:#fff}
+    .btn.success{background:var(--green);border-color:var(--green);color:#fff}
+    .btn.warn{background:var(--red);border-color:var(--red);color:#fff}
+    .result{background:#0b1220;color:#bfe7ff;border-radius:8px;padding:10px;overflow:auto}
+    .hint{font-size:.8rem;color:var(--muted)}
+    .section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .pill{display:inline-block;background:#eef2ff;color:#334155;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:.75rem}
+    .tight textarea{min-height:84px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono",Consolas,"Liberation Mono","Courier New",monospace}
   </style>
 </head>
 <body>
-  <h1>Lottery Optimizer</h1>
   <div class="wrap">
 
+    <h1>Lottery Optimizer</h1>
+
     <!-- CSV IMPORT -->
-    <div class="card stack">
-      <div class="grid-head">
+    <div class="card">
+      <div class="section-title">
         <h2>Bulk import history (CSV)</h2>
-        <div class="muted">Overwrite existing data
-          <input id="csv_overwrite" type="checkbox" checked>
-        </div>
+        <label class="row" style="gap:6px">
+          <input type="checkbox" id="csvOverwrite" checked />
+          Overwrite existing data
+        </label>
       </div>
-      <div class="row cols-4" style="grid-template-columns: 2fr auto auto 1fr;">
-        <input id="csv_file" type="file" accept=".csv"/>
-        <button id="csv_import" class="btn">Import CSV</button>
-        <div></div>
-        <pre id="csv_result" class="mono" style="margin:0;height:70px;overflow:auto;background:#0b1020;color:#cde; padding:10px;border-radius:8px"></pre>
-      </div>
+      <form id="csvForm" class="row" action="/store/import_csv" method="POST" enctype="multipart/form-data" onsubmit="return false;">
+        <input id="csvFile" type="file" name="file" accept=".csv" required style="flex:1 1 360px" />
+        <button id="csvSubmit" class="btn">Import CSV</button>
+      </form>
+      <pre id="csvResult" class="result mono" style="margin-top:10px;"></pre>
     </div>
 
     <!-- PHASE 1 -->
-    <h2 style="margin-top:24px">Phase 1 — Evaluation</h2>
-    <div class="row cols-2">
-      <div class="card stack">
-        <div class="grid-head">
-          <h3 style="margin:0">The 2nd Newest jackpots — with per-game dates</h3>
-          <small class="muted">Format preview: <span class="mono">[[mains…], bonus]</span>, <span class="mono">bonus=null</span> for IL</small>
-        </div>
+    <div class="card">
+      <div class="section-title">
+        <h2>Phase 1 — Evaluation</h2>
+        <span class="pill">The 2nd Newest jackpots — with per-game dates</span>
+      </div>
 
-        <!-- Left column: MM / PB -->
-        <div class="row cols-2">
-          <div class="stack">
-            <label>Mega Millions date (MM/DD/YYYY)</label>
-            <input id="date_mm" type="date"/>
-            <input id="mm_preview" type="text" placeholder="[[..mains..], bonus]" readonly/>
-            <button id="btn_get_mm" class="btn small">Retrieve</button>
+      <div class="grid cols-2">
+        <!-- LEFT: MM / PB dates + preview -->
+        <div class="grid cols-1">
+          <label>Mega Millions date (MM/DD/YYYY)</label>
+          <div class="row">
+            <input id="date_MM" type="date" style="max-width:220px" />
+            <button class="btn" onclick="retrieveJackpot('MM')">Retrieve</button>
           </div>
+          <input id="prev_MM" type="text" class="mono" placeholder="[[..mains..], bonus]" readonly />
 
-          <div class="stack">
-            <label>Powerball date (MM/DD/YYYY)</label>
-            <input id="date_pb" type="date"/>
-            <input id="pb_preview" type="text" placeholder="[[..mains..], bonus]" readonly/>
-            <button id="btn_get_pb" class="btn small">Retrieve</button>
+          <label style="margin-top:10px">Powerball date (MM/DD/YYYY)</label>
+          <div class="row">
+            <input id="date_PB" type="date" style="max-width:220px" />
+            <button class="btn" onclick="retrieveJackpot('PB')">Retrieve</button>
           </div>
+          <input id="prev_PB" type="text" class="mono" placeholder="[[..mains..], bonus]" readonly />
         </div>
 
-        <!-- Right column: IL (3 sections) -->
-        <div class="card stack" style="padding:10px; background:#fff">
-          <div class="muted" style="font-weight:600">IL Lotto — select dates then “Retrieve”</div>
+        <!-- RIGHT: IL date triplet + preview -->
+        <div class="grid cols-1">
+          <div class="hint" style="margin-bottom:4px">IL Lotto — select dates then <b>Retrieve</b> (bonus is <code>null</code>)</div>
 
-          <div class="row cols-3">
-            <div class="stack">
-              <label>Jackpot date</label>
-              <input id="date_il_jp" type="date"/>
-              <input id="il_jp_preview" type="text" placeholder="[[..mains..], null]" readonly/>
-              <button id="btn_get_il_jp" class="btn small">Retrieve</button>
-            </div>
-
-            <div class="stack">
-              <label>Million 1 date</label>
-              <input id="date_il_m1" type="date"/>
-              <input id="il_m1_preview" type="text" placeholder="[[..mains..], null]" readonly/>
-              <button id="btn_get_il_m1" class="btn small">Retrieve</button>
-            </div>
-
-            <div class="stack">
-              <label>Million 2 date</label>
-              <input id="date_il_m2" type="date"/>
-              <input id="il_m2_preview" type="text" placeholder="[[..mains..], null]" readonly/>
-              <button id="btn_get_il_m2" class="btn small">Retrieve</button>
-            </div>
+          <label>Jackpot date</label>
+          <div class="row">
+            <input id="date_IL_JP" type="date" style="max-width:220px" />
+            <button class="btn" onclick="retrieveJackpot('IL_JP')">Retrieve</button>
           </div>
-        </div>
+          <input id="prev_IL_JP" type="text" class="mono" placeholder="[[..mains..], null]" readonly />
 
-        <!-- Feeds -->
-        <div class="grid-head">
-          <h3 style="margin:0">Feeds (Lottery Defeated)</h3>
-          <small class="muted">Paste latest feeds when you run</small>
-        </div>
-        <div class="row cols-3">
-          <textarea id="feed_mm" placeholder="FEED_MM&#10;Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Mega Ball numbers: ...&#10;Top 3 overdue Mega Ball numbers: ..."></textarea>
-          <textarea id="feed_pb" placeholder="FEED_PB&#10;Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ...&#10;Top 3 hot Power Ball numbers: ...&#10;Top 3 overdue Power Ball numbers: ..."></textarea>
-          <textarea id="feed_il" placeholder="FEED_IL&#10;Top 8 hot numbers: ...&#10;Top 8 overdue numbers: ..."></textarea>
-        </div>
+          <label style="margin-top:10px">Million 1 date</label>
+          <div class="row">
+            <input id="date_IL_M1" type="date" style="max-width:220px" />
+            <button class="btn" onclick="retrieveJackpot('IL_M1')">Retrieve</button>
+          </div>
+          <input id="prev_IL_M1" type="text" class="mono" placeholder="[[..mains..], null]" readonly />
 
-        <!-- Run & status -->
-        <div class="row cols-3" style="align-items:center">
-          <button id="btn_run_phase1" class="btn primary">Run Phase 1</button>
-          <input id="phase1_saved_path" type="text" placeholder="Saved Phase-1 path…" readonly/>
-          <div id="phase1_msg" class="muted"></div>
+          <label style="margin-top:10px">Million 2 date</label>
+          <div class="row">
+            <input id="date_IL_M2" type="date" style="max-width:220px" />
+            <button class="btn" onclick="retrieveJackpot('IL_M2')">Retrieve</button>
+          </div>
+          <input id="prev_IL_M2" type="text" class="mono" placeholder="[[..mains..], null]" readonly />
         </div>
       </div>
 
-      <!-- History blocks -->
-      <div class="card stack">
-        <div class="grid-head">
-          <h3 style="margin:0">History blobs (top-down, newest first)</h3>
-          <small class="muted">Use the 3rd-newest date, then “Load 20 from that date”.</small>
+      <!-- FEEDS -->
+      <div class="grid cols-3" style="margin-top:14px">
+        <div>
+          <label>FEED_MM</label>
+          <textarea id="feed_MM" class="mono tight" placeholder="Paste latest MM feed…"></textarea>
         </div>
-
-        <div class="row cols-3">
-          <div class="stack">
-            <label>HIST_MM_BLOB</label>
-            <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
-              <input id="date_hist_mm" type="date"/>
-              <button id="btn_load20_mm" class="btn small">Load 20</button>
-            </div>
-            <textarea id="hist_mm_blob" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 MB"></textarea>
-          </div>
-
-          <div class="stack">
-            <label>HIST_PB_BLOB</label>
-            <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
-              <input id="date_hist_pb" type="date"/>
-              <button id="btn_load20_pb" class="btn small">Load 20</button>
-            </div>
-            <textarea id="hist_pb_blob" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 PB"></textarea>
-          </div>
-
-          <div class="stack">
-            <label>HIST_IL_BLOB (JP / M1 / M2)</label>
-
-            <div class="stack" style="gap:6px">
-              <small class="muted">JP</small>
-              <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
-                <input id="date_hist_il_jp" type="date"/>
-                <button id="btn_load20_il_jp" class="btn small">Load 20</button>
-              </div>
-              <textarea id="hist_il_blob_jp" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
-
-              <small class="muted" style="margin-top:6px">M1</small>
-              <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
-                <input id="date_hist_il_m1" type="date"/>
-                <button id="btn_load20_il_m1" class="btn small">Load 20</button>
-              </div>
-              <textarea id="hist_il_blob_m1" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
-
-              <small class="muted" style="margin-top:6px">M2</small>
-              <div class="row cols-3" style="grid-template-columns: 1fr auto auto;">
-                <input id="date_hist_il_m2" type="date"/>
-                <button id="btn_load20_il_m2" class="btn small">Load 20</button>
-              </div>
-              <textarea id="hist_il_blob_m2" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
-            </div>
-          </div>
+        <div>
+          <label>FEED_PB</label>
+          <textarea id="feed_PB" class="mono tight" placeholder="Paste latest PB feed…"></textarea>
+        </div>
+        <div>
+          <label>FEED_IL</label>
+          <textarea id="feed_IL" class="mono tight" placeholder="Paste latest IL feed…"></textarea>
         </div>
       </div>
-    </div><!-- /row -->
-  </div><!-- /wrap -->
 
-  <script src="/static/app.js"></script>
+      <!-- HISTORY BLOBS -->
+      <div class="section-title" style="margin-top:16px">
+        <h2>History blobs (top-down, newest first)</h2>
+        <span class="hint">Use the 3rd-newest date, then “Load 20”.</span>
+      </div>
+      <div class="grid cols-3">
+        <!-- MM -->
+        <div>
+          <div class="row">
+            <input id="histDate_MM" type="date" style="max-width:220px" />
+            <button class="btn" onclick="loadHistory('MM')">Load 20</button>
+          </div>
+          <textarea id="histBlob_MM" class="mono" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 MB"></textarea>
+        </div>
+
+        <!-- PB -->
+        <div>
+          <div class="row">
+            <input id="histDate_PB" type="date" style="max-width:220px" />
+            <button class="btn" onclick="loadHistory('PB')">Load 20</button>
+          </div>
+          <textarea id="histBlob_PB" class="mono" placeholder="mm-dd-yy — n1-n2-n3-n4-n5 PB"></textarea>
+        </div>
+
+        <!-- IL JP/M1/M2 -->
+        <div>
+          <div class="hint" style="margin:0 0 6px">HIST_IL_BLOB (JP / M1 / M2)</div>
+
+          <div class="row">
+            <input id="histDate_IL_JP" type="date" style="max-width:220px" />
+            <button class="btn" onclick="loadHistory('IL_JP')">Load 20</button>
+          </div>
+          <textarea id="histBlob_IL_JP" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+
+          <div class="row" style="margin-top:10px">
+            <input id="histDate_IL_M1" type="date" style="max-width:220px" />
+            <button class="btn" onclick="loadHistory('IL_M1')">Load 20</button>
+          </div>
+          <textarea id="histBlob_IL_M1" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+
+          <div class="row" style="margin-top:10px">
+            <input id="histDate_IL_M2" type="date" style="max-width:220px" />
+            <button class="btn" onclick="loadHistory('IL_M2')">Load 20</button>
+          </div>
+          <textarea id="histBlob_IL_M2" class="mono" placeholder="mm-dd-yy — A-B-C-D-E-F"></textarea>
+        </div>
+      </div>
+
+      <!-- RUN -->
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" onclick="runPhase1()">Run Phase 1</button>
+        <input id="savedPath" class="mono" type="text" placeholder="Saved Phase-1 path…" readonly style="flex:1 1 420px" />
+      </div>
+
+      <pre id="p1Result" class="result mono" style="margin-top:10px"></pre>
+    </div>
+  </div>
+
+  <script>
+    // -----------------------
+    // Helpers
+    // -----------------------
+    function prettyJSON(x){ return JSON.stringify(x,null,2); }
+    function show(el, msg){ el.textContent = msg; }
+    function get(el){ return document.getElementById(el); }
+
+    async function postCSV() {
+      const res = get('csvResult');
+      const fileInput = get('csvFile');
+      if (!fileInput.files.length) { show(res, 'Please choose a CSV file.'); return; }
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+      fd.append('overwrite', get('csvOverwrite').checked ? '1' : '0');
+      res.textContent = 'Uploading…';
+
+      try {
+        const r = await fetch('/store/import_csv', { method: 'POST', body: fd });
+        const t = await r.text();
+        try { show(res, prettyJSON(JSON.parse(t))); }
+        catch { show(res, t); }
+      } catch (e) {
+        show(res, `Upload failed: ${e}`);
+      }
+    }
+
+    get('csvSubmit').addEventListener('click', postCSV);
+
+    // -----------------------
+    // Retrieve jackpots by date
+    // /store/get_by_date?game=MM|PB|IL_JP|IL_M1|IL_M2&date=MM/DD/YYYY
+    // -----------------------
+    async function retrieveJackpot(game){
+      const dateEl = {
+        'MM': 'date_MM',
+        'PB': 'date_PB',
+        'IL_JP': 'date_IL_JP',
+        'IL_M1': 'date_IL_M1',
+        'IL_M2': 'date_IL_M2'
+      }[game];
+      const outEl = {
+        'MM': 'prev_MM',
+        'PB': 'prev_PB',
+        'IL_JP': 'prev_IL_JP',
+        'IL_M1': 'prev_IL_M1',
+        'IL_M2': 'prev_IL_M2'
+      }[game];
+
+      const dt = get(dateEl).value;
+      const out = get(outEl);
+      if (!dt){ out.value = 'Pick a date first'; return; }
+
+      try{
+        const r = await fetch(`/store/get_by_date?game=${encodeURIComponent(game)}&date=${encodeURIComponent(dt)}`);
+        if (!r.ok){
+          const txt = await r.text();
+          out.value = `Retrieve failed (${game}): ${r.status} ${txt}`;
+          return;
+        }
+        const data = await r.json();
+        // Expect: {"ok":true,"row":{"mains":[..],"bonus":N|null}}
+        const mains = data.row.mains || [];
+        const bonus = (data.row.bonus === undefined) ? null : data.row.bonus;
+        out.value = JSON.stringify([mains, bonus]);
+      }catch(e){
+        out.value = `Retrieve failed (${game}): ${e}`;
+      }
+    }
+
+    // -----------------------
+    // Load history (20) by start date
+    // /store/get_history?game=MM|PB|IL_JP|IL_M1|IL_M2&from=MM/DD/YYYY&limit=20
+    // -----------------------
+    async function loadHistory(game){
+      const dateEl = {
+        'MM': 'histDate_MM','PB': 'histDate_PB',
+        'IL_JP': 'histDate_IL_JP','IL_M1': 'histDate_IL_M1','IL_M2': 'histDate_IL_M2'
+      }[game];
+      const outEl = {
+        'MM': 'histBlob_MM','PB':'histBlob_PB',
+        'IL_JP':'histBlob_IL_JP','IL_M1':'histBlob_IL_M1','IL_M2':'histBlob_IL_M2'
+      }[game];
+
+      const dt = get(dateEl).value;
+      const out = get(outEl);
+      if (!dt){ out.value = 'Pick a date first'; return; }
+
+      try{
+        const r = await fetch(`/store/get_history?game=${encodeURIComponent(game)}&from=${encodeURIComponent(dt)}&limit=20`);
+        if (!r.ok){
+          const txt = await r.text();
+          out.value = `Load failed (${game}): ${r.status} ${txt}`;
+          return;
+        }
+        const data = await r.json();
+        // Expect: {"ok":true,"rows":[...],"blob":"..."}
+        out.value = data.blob || '';
+      }catch(e){
+        out.value = `Load failed (${game}): ${e}`;
+      }
+    }
+
+    // -----------------------
+    // Build payload & Run Phase 1
+    // -----------------------
+    function parsePreview(id){
+      try { return JSON.parse(get(id).value); }
+      catch { return null; }
+    }
+    function buildPhase1Payload(){
+      const LMM = parsePreview('prev_MM');
+      const LPB = parsePreview('prev_PB');
+      const LJP = parsePreview('prev_IL_JP');
+      const LM1 = parsePreview('prev_IL_M1');
+      const LM2 = parsePreview('prev_IL_M2');
+
+      return {
+        phase: "phase1",
+        LATEST_MM: LMM,
+        LATEST_PB: LPB,
+        LATEST_IL_JP: LJP,
+        LATEST_IL_M1: LM1,
+        LATEST_IL_M2: LM2,
+        FEED_MM: get('feed_MM').value || "",
+        FEED_PB: get('feed_PB').value || "",
+        FEED_IL: get('feed_IL').value || "",
+        HIST_MM_BLOB: get('histBlob_MM').value || "",
+        HIST_PB_BLOB: get('histBlob_PB').value || "",
+        HIST_IL_BLOB_JP: get('histBlob_IL_JP').value || "",
+        HIST_IL_BLOB_M1: get('histBlob_IL_M1').value || "",
+        HIST_IL_BLOB_M2: get('histBlob_IL_M2').value || ""
+      };
+    }
+
+    async function runPhase1(){
+      const out = get('p1Result');
+      out.textContent = 'Running Phase 1…';
+      const payload = buildPhase1Payload();
+
+      try{
+        const r = await fetch('/run_json', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const text = await r.text();
+        try{
+          const data = JSON.parse(text);
+          out.textContent = prettyJSON(data);
+          if (data && data.saved_path){ get('savedPath').value = data.saved_path; }
+        }catch{
+          out.textContent = text; // non-JSON response (server error HTML)
+        }
+      }catch(e){
+        out.textContent = `Phase 1 failed: ${e}`;
+      }
+    }
+  </script>
 </body>
 </html>
