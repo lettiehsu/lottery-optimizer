@@ -14,22 +14,17 @@
     }
     *{ box-sizing:border-box }
     html,body{ height:100% }
-    body{
-      margin:0; font-family:Inter,system-ui,Segoe UI,Arial; color:var(--ink);
-      background:var(--bg);
-    }
+    body{ margin:0; font-family:Inter,system-ui,Segoe UI,Arial; color:var(--ink); background:var(--bg) }
     .wrap{ max-width:1160px; margin:0 auto; padding:18px }
     h1{ margin:0 0 10px 0; font-size:22px }
     h2{ margin:16px 0 8px 0; font-size:18px }
     .row{ display:grid; gap:12px }
     .row.cols-2{ grid-template-columns: 1fr 1fr }
     .row.cols-3{ grid-template-columns: repeat(3,1fr) }
-    .card{
-      background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px;
-    }
+    .card{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px }
     .pill{ display:inline-block; padding:4px 8px; border:1px solid var(--line); border-radius:999px; font-size:12px; background:#fff }
     label{ font-size:12px; color:var(--sub); display:block; margin-bottom:6px }
-    input[type="text"], input[type="number"], textarea, select{
+    input[type="text"], textarea, select{
       width:100%; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink);
     }
     textarea{ min-height:112px; white-space:pre; }
@@ -37,23 +32,17 @@
     .btn.primary{ background:var(--accent); color:#fff; border-color:#0b0f19 }
     .tiny{ font-size:12px; color:var(--sub) }
     .mt{ margin-top:12px } .mt-lg{ margin-top:18px } .mt-xl{ margin-top:28px }
-    .right{ text-align:right }
     .flex{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     .w-120{ width:120px }
-    .result-light{
-      background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:14px;
-    }
-    .result-grid{ display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)) }
-    .result-title{ font-weight:600; margin-bottom:6px }
-    .result-pre{
-      background:#ffffff;border:1px solid var(--line);border-radius:8px;padding:10px;margin:0;min-height:60px;white-space:pre;
-    }
-    .result-pre.raw{ max-height:260px; overflow:auto }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace }
     .badge{ display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); background:#fff }
     .badge.ok{ background:#ecfdf5; border-color:var(--ok); color:#065f46 }
     .badge.no{ background:#fef2f2; border-color:var(--bad); color:#7f1d1d }
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace }
-    .muted{ color:var(--sub); font-size:12px }
+    .result-light{ background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:14px }
+    .result-grid{ display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)) }
+    .result-title{ font-weight:600; margin-bottom:6px }
+    .result-pre{ background:#ffffff;border:1px solid var(--line);border-radius:8px;padding:10px;margin:0;min-height:60px;white-space:pre }
+    .result-pre.raw{ max-height:260px; overflow:auto }
   </style>
 </head>
 <body>
@@ -63,7 +52,7 @@
     <!-- CSV upload -->
     <div class="card">
       <div class="flex">
-        <input id="importCsvFile" type="file" class="inline" />
+        <input id="importCsvFile" type="file"/>
         <label class="flex" style="gap:6px;">
           <input id="overwriteChk" type="checkbox" checked/>
           <span class="tiny">Overwrite existing data</span>
@@ -149,18 +138,17 @@
       </div>
     </div>
 
-    <!-- History blobs -->
+    <!-- History blobs (with the requested “Load 20” buttons) -->
     <div class="row cols-3 mt">
       <!-- MM -->
       <div class="card">
         <div class="flex">
           <div class="pill">History blobs — MM</div>
-          <div class="right" style="flex:1"></div>
+          <div style="flex:1"></div>
           <input id="hist_mm_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <input id="hist_mm_limit" type="number" value="50" min="1" class="w-120" />
-          <button data-game="MM" class="btn btnLoad">Load</button>
+          <button id="btnLoadMM20" class="btn">Load 20</button>
         </div>
-        <div class="muted mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  MB</span></div>
+        <div class="tiny mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  MB</span></div>
         <textarea id="hist_mm_blob" class="mono mt" placeholder=""></textarea>
       </div>
 
@@ -168,40 +156,36 @@
       <div class="card">
         <div class="flex">
           <div class="pill">History blobs — PB</div>
-          <div class="right" style="flex:1"></div>
+          <div style="flex:1"></div>
           <input id="hist_pb_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <input id="hist_pb_limit" type="number" value="50" min="1" class="w-120" />
-          <button data-game="PB" class="btn btnLoad">Load</button>
+          <button id="btnLoadPB20" class="btn">Load 20</button>
         </div>
-        <div class="muted mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  PB</span></div>
+        <div class="tiny mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  PB</span></div>
         <textarea id="hist_pb_blob" class="mono mt" placeholder=""></textarea>
       </div>
 
       <!-- IL (JP/M1/M2) -->
       <div class="card">
-        <div class="pill">HIST_IL_BLOB (JP / M1 / M2) — use the 3rd-newest date then load</div>
+        <div class="pill">HIST_IL_BLOB (JP / M1 / M2) — use the 3rd-newest date then “Load 20”.</div>
 
         <div class="flex mt">
-          <label class="inline">JP</label>
+          <label class="inline tiny" style="width:20px">JP</label>
           <input id="hist_il_jp_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <input id="hist_il_jp_limit" type="number" value="50" min="1" class="w-120" />
-          <button data-game="IL_JP" class="btn btnLoad">Load</button>
+          <button id="btnLoadILJP20" class="btn">Load 20</button>
         </div>
         <textarea id="hist_il_jp_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
 
         <div class="flex mt">
-          <label class="inline">M1</label>
+          <label class="inline tiny" style="width:20px">M1</label>
           <input id="hist_il_m1_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <input id="hist_il_m1_limit" type="number" value="50" min="1" class="w-120" />
-          <button data-game="IL_M1" class="btn btnLoad">Load</button>
+          <button id="btnLoadILM120" class="btn">Load 20</button>
         </div>
         <textarea id="hist_il_m1_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
 
         <div class="flex mt">
-          <label class="inline">M2</label>
+          <label class="inline tiny" style="width:20px">M2</label>
           <input id="hist_il_m2_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <input id="hist_il_m2_limit" type="number" value="50" min="1" class="w-120" />
-          <button data-game="IL_M2" class="btn btnLoad">Load</button>
+          <button id="btnLoadILM220" class="btn">Load 20</button>
         </div>
         <textarea id="hist_il_m2_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
       </div>
@@ -223,38 +207,23 @@
         <div>
           <div class="result-title">Mega Millions — NJ line</div>
           <pre id="p1_mm_line" class="result-pre">—</pre>
-          <div class="mt">
-            <span id="p1_mm_exact" class="badge">Exact: —</span>
-            <span class="tiny" style="margin-left:8px;">Batch: <span id="p1_mm_batch">—</span> • Position: <span id="p1_mm_pos">—</span></span>
-          </div>
-          <div class="mt">
-            <div class="muted">Stats (3, 3+MB, 4, 4+MB, 5, 5+MB)</div>
-            <pre id="p1_mm_stats" class="result-pre">—</pre>
-          </div>
+          <div class="tiny">Batch: <span id="p1_mm_batch">—</span> • Position: <span id="p1_mm_pos">—</span></div>
+          <div class="mt"><span id="p1_mm_exact" class="badge">Exact: —</span></div>
+          <div class="mt"><div class="tiny">Stats (3, 3+MB, 4, 4+MB, 5, 5+MB)</div><pre id="p1_mm_stats" class="result-pre">—</pre></div>
         </div>
         <div>
           <div class="result-title">Powerball — NJ line</div>
           <pre id="p1_pb_line" class="result-pre">—</pre>
-          <div class="mt">
-            <span id="p1_pb_exact" class="badge">Exact: —</span>
-            <span class="tiny" style="margin-left:8px;">Batch: <span id="p1_pb_batch">—</span> • Position: <span id="p1_pb_pos">—</span></span>
-          </div>
-          <div class="mt">
-            <div class="muted">Stats (3, 3+PB, 4, 4+PB, 5, 5+PB)</div>
-            <pre id="p1_pb_stats" class="result-pre">—</pre>
-          </div>
+          <div class="tiny">Batch: <span id="p1_pb_batch">—</span> • Position: <span id="p1_pb_pos">—</span></div>
+          <div class="mt"><span id="p1_pb_exact" class="badge">Exact: —</span></div>
+          <div class="mt"><div class="tiny">Stats (3, 3+PB, 4, 4+PB, 5, 5+PB)</div><pre id="p1_pb_stats" class="result-pre">—</pre></div>
         </div>
         <div>
           <div class="result-title">IL Lotto — NJ lines (JP / M1 / M2)</div>
           <pre id="p1_il_lines" class="result-pre">—</pre>
-          <div class="mt">
-            <span id="p1_il_exact" class="badge">All three exact: —</span>
-            <span class="tiny" style="margin-left:8px;">Batch JP/M1/M2: <span id="p1_il_batch">—</span> • Position JP/M1/M2: <span id="p1_il_pos">—</span></span>
-          </div>
-          <div class="mt">
-            <div class="muted">Stats (3/4/5/6-ball matches, no bonus)</div>
-            <pre id="p1_il_stats" class="result-pre">—</pre>
-          </div>
+          <div class="tiny">Batch JP/M1/M2: <span id="p1_il_batch">—</span> • Position JP/M1/M2: <span id="p1_il_pos">—</span></div>
+          <div class="mt"><span id="p1_il_exact" class="badge">All three exact: —</span></div>
+          <div class="mt"><div class="tiny">Stats (3/4/5/6 hits, no bonus)</div><pre id="p1_il_stats" class="result-pre">—</pre></div>
         </div>
       </div>
 
@@ -264,7 +233,7 @@
       </details>
     </div>
 
-    <!-- Phase 2 — placeholder -->
+    <!-- Phase 2 placeholder -->
     <h2 class="mt-xl">Phase 2 — Prediction</h2>
     <div class="row cols-3">
       <div class="card">
@@ -297,7 +266,6 @@
 • Connect this UI to your backend route when ready.</pre>
       </div>
     </div>
-
   </div>
 
   <script src="/static/app.js"></script>
