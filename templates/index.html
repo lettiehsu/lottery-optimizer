@@ -1,132 +1,206 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8"/>
   <title>Lottery Optimizer</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/static/styles.css"/>
+  <style>
+    body{font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial}
+    .row{display:grid; gap:12px}
+    .grid2{grid-template-columns: 1fr 1fr}
+    .grid3{grid-template-columns: 1fr 1fr 1fr}
+    .card{border:1px solid #e5e7eb; border-radius:10px; padding:12px; background:#fff}
+    h2{margin:6px 0 12px}
+    h3{margin:0 0 8px; font-size:15px}
+    .btn{padding:6px 10px; border:1px solid #d1d5db; border-radius:8px; background:#f8fafc; cursor:pointer}
+    .btn.primary{background:#2563eb; border-color:#1d4ed8; color:#fff}
+    input[type="text"]{width:100%; padding:8px; border:1px solid #d1d5db; border-radius:8px}
+    textarea{width:100%; height:160px; padding:8px; border:1px solid #d1d5db; border-radius:8px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px}
+    .muted{color:#6b7280}
+    .pre{white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px}
+    .table{width:100%; border-collapse:collapse; font-size:13px}
+    .table th,.table td{border-top:1px solid #e5e7eb; padding:6px; vertical-align:top}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  </style>
 </head>
 <body>
-  <h1>Lottery Optimizer</h1>
-
-  <!-- CSV upload -->
-  <section class="card">
-    <h2>Bulk import history (CSV)</h2>
-    <div class="row">
-      <input type="file" id="csvFile" />
-      <label><input type="checkbox" id="csvOverwrite" checked> Overwrite existing data</label>
-      <button id="btnImportCSV">Import CSV</button>
+  <div class="row" style="grid-template-columns:1fr auto auto; align-items:end" class="card">
+    <div class="card">
+      <h2>Bulk import history (CSV)</h2>
+      <form id="csvForm">
+        <input type="file" id="csvFile" name="file" accept=".csv"/>
+        <label><input type="checkbox" id="overwrite" checked/> Overwrite existing data</label>
+        <button class="btn" type="submit">Import CSV</button>
+      </form>
+      <pre id="csvResult" class="pre"></pre>
     </div>
-    <pre id="csvResult" class="mono small"></pre>
-  </section>
+  </div>
 
-  <section class="card">
+  <div class="card">
     <h2>Phase 1 — Evaluation</h2>
-    <div class="grid2">
-      <!-- Left: MM & PB -->
-      <div>
+
+    <div class="row grid2">
+      <div class="card">
         <h3>The 2nd Newest jackpots — with per-game dates</h3>
 
-        <label>Mega Millions date (MM/DD/YYYY)
-          <input id="mmDate" type="text" placeholder="MM/DD/YYYY" />
-        </label>
-        <div class="row">
-          <input id="mmPreview" type="text" placeholder="[[mains..], bonus]" />
-          <button id="btnRetrieveMM">Retrieve</button>
+        <div>
+          <div class="muted">Mega Millions date (MM/DD/YYYY)</div>
+          <div class="row" style="grid-template-columns:auto 100px">
+            <input id="mmDate" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="mmFetch">Retrieve</button>
+          </div>
+          <input id="mmPreview" type="text" class="mono" placeholder="[[mains..], bonus]">
         </div>
 
-        <label>Powerball date (MM/DD/YYYY)
-          <input id="pbDate" type="text" placeholder="MM/DD/YYYY" />
-        </label>
-        <div class="row">
-          <input id="pbPreview" type="text" placeholder="[[mains..], bonus]" />
-          <button id="btnRetrievePB">Retrieve</button>
+        <div style="margin-top:10px">
+          <div class="muted">Powerball date (MM/DD/YYYY)</div>
+          <div class="row" style="grid-template-columns:auto 100px">
+            <input id="pbDate" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="pbFetch">Retrieve</button>
+          </div>
+          <input id="pbPreview" type="text" class="mono" placeholder="[[mains..], bonus]">
         </div>
       </div>
 
-      <!-- Right: IL trio -->
-      <div>
+      <div class="card">
         <h3>IL Lotto — select dates then “Retrieve” (bonus is null)</h3>
 
-        <label>Jackpot date
-          <input id="ilJPDate" type="text" placeholder="MM/DD/YYYY" />
-        </label>
-        <div class="row">
-          <input id="ilJPPreview" type="text" placeholder="[[mains..], null]" />
-          <button id="btnRetrieveILJP">Retrieve</button>
+        <div>
+          <div class="muted">Jackpot date</div>
+          <div class="row" style="grid-template-columns:auto 100px">
+            <input id="ilJPDate" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="ilJPFetch">Retrieve</button>
+          </div>
+          <input id="ilJPPreview" type="text" class="mono" placeholder="[[mains..], null]">
         </div>
 
-        <label>Million 1 date
-          <input id="ilM1Date" type="text" placeholder="MM/DD/YYYY" />
-        </label>
-        <div class="row">
-          <input id="ilM1Preview" type="text" placeholder="[[mains..], null]" />
-          <button id="btnRetrieveILM1">Retrieve</button>
+        <div style="margin-top:10px">
+          <div class="muted">Million 1 date</div>
+          <div class="row" style="grid-template-columns:auto 100px">
+            <input id="ilM1Date" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="ilM1Fetch">Retrieve</button>
+          </div>
+          <input id="ilM1Preview" type="text" class="mono" placeholder="[[mains..], null]">
         </div>
 
-        <label>Million 2 date
-          <input id="ilM2Date" type="text" placeholder="MM/DD/YYYY" />
-        </label>
-        <div class="row">
-          <input id="ilM2Preview" type="text" placeholder="[[mains..], null]" />
-          <button id="btnRetrieveILM2">Retrieve</button>
+        <div style="margin-top:10px">
+          <div class="muted">Million 2 date</div>
+          <div class="row" style="grid-template-columns:auto 100px">
+            <input id="ilM2Date" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="ilM2Fetch">Retrieve</button>
+          </div>
+          <input id="ilM2Preview" type="text" class="mono" placeholder="[[mains..], null]">
         </div>
       </div>
     </div>
 
-    <h3>Feeds (Lottery Defeated)</h3>
-    <div class="grid3">
-      <textarea id="feedMM" placeholder="Paste latest MM feed..."></textarea>
-      <textarea id="feedPB" placeholder="Paste latest PB feed..."></textarea>
-      <textarea id="feedIL" placeholder="Paste latest IL feed..."></textarea>
-    </div>
-
-    <h3>History blobs (top-down, newest first)</h3>
-    <div class="grid3">
-      <div>
-        <div class="row">
-          <input id="mmHistDate" type="text" placeholder="MM/DD/YYYY" />
-          <button id="btnLoad20MM">Load 20</button>
-        </div>
-        <textarea id="mmHistBlob" class="mono" rows="15"></textarea>
+    <div class="row grid3" style="margin-top:12px">
+      <div class="card">
+        <h3>Feeds (Lottery Defeated)</h3>
+        <textarea id="feedMM" placeholder="Paste latest MM feed..."></textarea>
       </div>
-
-      <div>
-        <div class="row">
-          <input id="pbHistDate" type="text" placeholder="MM/DD/YYYY" />
-          <button id="btnLoad20PB">Load 20</button>
-        </div>
-        <textarea id="pbHistBlob" class="mono" rows="15"></textarea>
+      <div class="card">
+        <h3>&nbsp;</h3>
+        <textarea id="feedPB" placeholder="Paste latest PB feed..."></textarea>
       </div>
-
-      <div>
-        <p class="small muted">Use the 3rd-newest date for each, then “Load 20”.</p>
-        <div class="row">
-          <input id="ilJPHistDate" type="text" placeholder="MM/DD/YYYY" />
-          <button id="btnLoad20ILJP">Load 20 (JP)</button>
-        </div>
-        <textarea id="ilJPHistBlob" class="mono" rows="7"></textarea>
-
-        <div class="row">
-          <input id="ilM1HistDate" type="text" placeholder="MM/DD/YYYY" />
-          <button id="btnLoad20ILM1">Load 20 (M1)</button>
-        </div>
-        <textarea id="ilM1HistBlob" class="mono" rows="7"></textarea>
-
-        <div class="row">
-          <input id="ilM2HistDate" type="text" placeholder="MM/DD/YYYY" />
-          <button id="btnLoad20ILM2">Load 20 (M2)</button>
-        </div>
-        <textarea id="ilM2HistBlob" class="mono" rows="7"></textarea>
+      <div class="card">
+        <h3>&nbsp;</h3>
+        <textarea id="feedIL" placeholder="Paste latest IL feed..."></textarea>
       </div>
     </div>
 
-    <div class="row mt">
-      <button id="btnRunPhase1" class="primary">Run Phase 1</button>
-      <input id="savedPhase1Path" type="text" placeholder="Saved Phase-1 path..." />
+    <div class="row" style="grid-template-columns:1fr 1fr 1fr; margin-top:12px">
+      <div class="card">
+        <h3>History blobs — MM</h3>
+        <div class="row" style="grid-template-columns:auto 90px">
+          <input id="histMMDate" type="text" placeholder="MM/DD/YYYY">
+          <button class="btn" id="histMMBtn">Load 20</button>
+        </div>
+        <textarea id="histMM"></textarea>
+      </div>
+
+      <div class="card">
+        <h3>History blobs — PB</h3>
+        <div class="row" style="grid-template-columns:auto 90px">
+          <input id="histPBDate" type="text" placeholder="MM/DD/YYYY">
+          <button class="btn" id="histPBBtn">Load 20</button>
+        </div>
+        <textarea id="histPB"></textarea>
+      </div>
+
+      <div class="card">
+        <h3>HIST_IL_BLOB (JP / M1 / M2)</h3>
+
+        <div class="muted">Use the 3rd-newest date for each, then “Load 20”.</div>
+
+        <div style="margin-top:8px">
+          <div class="row" style="grid-template-columns:auto 90px">
+            <input id="histILJPDate" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="histILJPBtn">Load 20</button>
+          </div>
+          <textarea id="histILJP"></textarea>
+        </div>
+
+        <div style="margin-top:8px">
+          <div class="row" style="grid-template-columns:auto 90px">
+            <input id="histILM1Date" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="histILM1Btn">Load 20</button>
+          </div>
+          <textarea id="histILM1"></textarea>
+        </div>
+
+        <div style="margin-top:8px">
+          <div class="row" style="grid-template-columns:auto 90px">
+            <input id="histILM2Date" type="text" placeholder="MM/DD/YYYY">
+            <button class="btn" id="histILM2Btn">Load 20</button>
+          </div>
+          <textarea id="histILM2"></textarea>
+        </div>
+      </div>
     </div>
 
-    <pre id="runLog" class="mono small"></pre>
-  </section>
+    <div class="row" style="grid-template-columns:auto 1fr; margin-top:12px; align-items:center">
+      <button class="btn primary" id="runPhase1">Run Phase 1</button>
+      <input id="savedPhase1Path" type="text" readonly placeholder="Saved Phase-1 path..." />
+    </div>
+
+    <!-- RESULTS -->
+    <div class="card" id="phase1Results" style="margin-top:12px; display:none">
+      <h3>Phase 1 — Results</h3>
+      <div id="p1Summary" class="pre"></div>
+
+      <div class="row grid3" style="margin-top:10px">
+        <div class="card">
+          <h3>MM exact rows vs NJ</h3>
+          <table class="table" id="mmExact"></table>
+        </div>
+        <div class="card">
+          <h3>PB exact rows vs NJ</h3>
+          <table class="table" id="pbExact"></table>
+        </div>
+        <div class="card">
+          <h3>IL exact rows vs NJ</h3>
+          <table class="table" id="ilExact"></table>
+        </div>
+      </div>
+
+      <div class="row grid3" style="margin-top:10px">
+        <div class="card">
+          <h3>Bands — IL</h3>
+          <div id="bandsIL" class="pre"></div>
+        </div>
+        <div class="card">
+          <h3>Bands — MM</h3>
+          <div id="bandsMM" class="pre"></div>
+        </div>
+        <div class="card">
+          <h3>Bands — PB</h3>
+          <div id="bandsPB" class="pre"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
