@@ -1,303 +1,249 @@
-# lottery_core.py
-# ------------------------------------------------------------
-# Core for Phase 1 / 2 / 3 compatible with your UI.
-# - Phase 1 accepts either:
-#     (A) new style: dates only (mm_date, pb_date, il_jp_date, il_m1_date, il_m2_date)
-#         and will fetch rows from lottery_store, build LATEST_* strings,
-#         and assemble history blobs from the store (hist_*_from).
-#     (B) old style: LATEST_* strings + HIST_*_BLOB strings.
-#   It saves a normalized Phase-1 JSON to /tmp for Phase-2.
-# - Phase 2 reads the Phase-1 JSON, (placeholder) returns bands and echo data.
-# - Phase 3 accepts NWJ (string or JSON) and saves a confirmation JSON.
-# - recent_files() lists recent /tmp files for the UI.
-# ------------------------------------------------------------
-
 from __future__ import annotations
 
-import os
-import re
+import csv
+import io
 import json
-import ast
-import glob
+import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
-# try to use the CSV-backed store for fetch-by-date and history
-try:
-    import lottery_store as _store
-except Exception:
-    _store = None
+# Persist the normalized rows here (works on Render)
+STORE_PATH = "/tmp/lotto_store.json"
 
-_TMP = "/tmp"
+# In-memory DB: key = (game, date, tier_or_empty)
+_DB: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 
-# ----------------------------- helpers ----------------------------- #
+# ---------------- Date helpers ---------------- #
 
-def _coerce_latest(val: Any, *, allow_null_bonus: bool = True) -> Tuple[List[int], Optional[int]]:
+def _norm_date(s: str) -> str:
     """
+    Normalize many date shapes to zero-padded MM/DD/YYYY.
+
     Accepts:
-      - string: '[[n1,..], bonus]' or '[[..6..], null]'
-      - list/tuple: [[...], bonus]
-    Returns: (mains, bonus)
+      9/6/2025, 09/06/2025, 9-6-2025,
+      09/19/25, 9/19/25, 09-19-25  (2-digit year -> 2000+YY),
+      2025-09-06, 2025/9/6
+
+    Always returns: MM/DD/YYYY
     """
-    if isinstance(val, (list, tuple)):
-        if len(val) != 2 or not isinstance(val[0], (list, tuple)):
-            raise ValueError("LATEST_* must be [[...], bonus]")
-        mains = [int(x) for x in val[0]]
-        bonus = val[1]
-        if bonus is None:
-            if not allow_null_bonus:
-                raise ValueError("Bonus cannot be null for this game")
-        else:
-            bonus = int(bonus)
-        return mains, bonus
+    s = (s or "").strip()
+    if not s:
+        raise ValueError("empty date")
 
-    if isinstance(val, str):
-        s = val.strip()
-        if not s:
-            raise ValueError("LATEST_* is empty")
-        try:
-            parsed = json.loads(s)
-        except Exception:
-            parsed = ast.literal_eval(s)
-        return _coerce_latest(parsed, allow_null_bonus=allow_null_bonus)
+    # uniform separators
+    t = s.replace("-", "/")
+    parts = [p.strip() for p in t.split("/") if p.strip()]
+    if len(parts) != 3:
+        raise ValueError(f"Unrecognized date: {s!r}")
 
-    raise ValueError("LATEST_* must be a JSON string or a 2-element list")
+    def to_int(x: str) -> int:
+        if not x.isdigit():
+            raise ValueError(f"Unrecognized date: {s!r}")
+        return int(x, 10)
 
-
-# history blob line patterns your UI shows
-_re_line_mm = re.compile(r"^\s*(\d{2}-\d{2}-\d{2})\s+(\d{1,2}-\d{1,2}-\d{1,2}-\d{1,2}-\d{1,2})\s+\d{1,2}\s*$")
-_re_line_il = re.compile(r"^\s*(\d{2}-\d{2}-\d{2})\s+(\d{1,2}-\d{1,2}-\d{1,2}-\d{1,2}-\d{1,2}-\d{1,2})\s*$")
-
-def _parse_hist_blob_mm(blob: str) -> List[List[int]]:
-    rows: List[List[int]] = []
-    for line in (blob or "").splitlines():
-        m = _re_line_mm.match(line.strip())
-        if not m:
-            continue
-        mains = [int(x) for x in m.group(2).split("-")]
-        if len(mains) == 5:
-            rows.append(mains)
-    return rows
-
-def _parse_hist_blob_il(blob: str) -> List[List[int]]:
-    rows: List[List[int]] = []
-    for line in (blob or "").splitlines():
-        m = _re_line_il.match(line.strip())
-        if not m:
-            continue
-        mains = [int(x) for x in m.group(2).split("-")]
-        if len(mains) == 6:
-            rows.append(mains)
-    return rows
-
-def _percentile(sorted_vals: List[float], p: float) -> float:
-    n = len(sorted_vals)
-    if n == 0:
-        return 0.0
-    if n == 1:
-        return float(sorted_vals[0])
-    if p <= 0:   return float(sorted_vals[0])
-    if p >= 1:   return float(sorted_vals[-1])
-    idx = (n - 1) * p
-    i = int(idx)
-    frac = idx - i
-    return float(sorted_vals[i] * (1 - frac) + sorted_vals[i + 1] * frac)
-
-def _sum_band_from_hist(rows: List[List[int]]) -> Tuple[int, int]:
-    if not rows:
-        return (0, 0)
-    sums = sorted(sum(r) for r in rows)
-    lo = int(round(_percentile(sums, 0.25)))
-    hi = int(round(_percentile(sums, 0.75)))
-    return (lo, hi)
-
-def _fmt_mm_pb_row(row: Dict[str, Any]) -> str:
-    # -> "[[mains...], bonus]"
-    a,b,c,d,e = row["mains"]
-    bb = row["bonus"]
-    return f"[[{a},{b},{c},{d},{e}],{bb}]"
-
-def _fmt_il_row(row: Dict[str, Any]) -> str:
-    # -> "[[n1..n6], null]"
-    a,b,c,d,e,f = row["mains"]
-    return f"[[{a},{b},{c},{d},{e},{f}],null]"
-
-def _hist_blob_from_store(game: str, from_date: str, limit: int = 20) -> str:
-    if not _store:
-        return ""
-    res = _store.get_history(game, from_date, limit=limit)
-    return res.get("blob", "") if isinstance(res, dict) else ""
-
-
-# ----------------------------- Phase 1 ----------------------------- #
-
-def handle_run(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Phase-1 adapter:
-      New style (preferred):
-        mm_date, pb_date, il_jp_date, il_m1_date, il_m2_date (MM/DD/YYYY)
-        hist_mm_from, hist_pb_from, hist_iljp_from, hist_ilm1_from, hist_ilm2_from (optional)
-      Old style (fallback):
-        LATEST_MM, LATEST_PB, LATEST_IL_JP, LATEST_IL_M1, LATEST_IL_M2 (strings)
-        HIST_MM_BLOB, HIST_PB_BLOB, HIST_IL_BLOB_[JP|M1|M2] (strings)
-    Saves normalized Phase-1 json to /tmp and returns bands + saved_path.
-    """
-    latest = {}
-    hblobs = {}
-
-    # ---------- Try new style (dates + store lookup) ----------
-    use_new = any(k in payload for k in ("mm_date","pb_date","il_jp_date","il_m1_date","il_m2_date"))
-    if use_new and _store:
-        def need(k):
-            v = (payload.get(k) or "").strip()
-            if not v:
-                raise ValueError(f"Pick dates to fetch: missing {k}")
-            return v
-
-        mm_date  = need("mm_date")
-        pb_date  = need("pb_date")
-        il_jp_dt = need("il_jp_date")
-        il_m1_dt = need("il_m1_date")
-        il_m2_dt = need("il_m2_date")
-
-        r_mm = _store.get_by_date("MM", mm_date)
-        r_pb = _store.get_by_date("PB", pb_date)
-        r_jp = _store.get_by_date("IL", il_jp_dt,  tier="JP")
-        r_m1 = _store.get_by_date("IL", il_m1_dt, tier="M1")
-        r_m2 = _store.get_by_date("IL", il_m2_dt, tier="M2")
-
-        if not all([r_mm, r_pb, r_jp, r_m1, r_m2]):
-            missing = [n for n,r in [("MM",r_mm),("PB",r_pb),("IL_JP",r_jp),("IL_M1",r_m1),("IL_M2",r_m2)] if not r]
-            return {"ok": False, "error": "not_found", "detail": f"Missing in store: {', '.join(missing)}"}
-
-        latest["LATEST_MM"]    = _fmt_mm_pb_row(r_mm)
-        latest["LATEST_PB"]    = _fmt_mm_pb_row(r_pb)
-        latest["LATEST_IL_JP"] = _fmt_il_row(r_jp)
-        latest["LATEST_IL_M1"] = _fmt_il_row(r_m1)
-        latest["LATEST_IL_M2"] = _fmt_il_row(r_m2)
-
-        # history blobs (top-down newest first)
-        hblobs["HIST_MM_BLOB"]    = _hist_blob_from_store("MM",    payload.get("hist_mm_from")   or mm_date)
-        hblobs["HIST_PB_BLOB"]    = _hist_blob_from_store("PB",    payload.get("hist_pb_from")   or pb_date)
-        hblobs["HIST_IL_JP_BLOB"] = _hist_blob_from_store("IL_JP", payload.get("hist_iljp_from") or il_jp_dt)
-        hblobs["HIST_IL_M1_BLOB"] = _hist_blob_from_store("IL_M1", payload.get("hist_ilm1_from") or il_m1_dt)
-        hblobs["HIST_IL_M2_BLOB"] = _hist_blob_from_store("IL_M2", payload.get("hist_ilm2_from") or il_m2_dt)
-
+    if len(parts[0]) == 4:  # YYYY/M/D
+        y = to_int(parts[0]); m = to_int(parts[1]); d = to_int(parts[2])
     else:
-        # ---------- Old style (already-built strings) ----------
-        for k in ("LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"):
-            v = payload.get(k)
-            if not isinstance(v, str):
-                return {"ok": False, "error": "ValueError", "detail": f"{k} must be a string like '[[..], b]' or '[[..], null]'"}
-            latest[k] = v
+        if len(parts[2]) == 4:  # M/D/YYYY
+            m = to_int(parts[0]); d = to_int(parts[1]); y = to_int(parts[2])
+        else:  # M/D/YY -> 2000 + YY
+            m = to_int(parts[0]); d = to_int(parts[1]); y = 2000 + to_int(parts[2])
 
-        # optional history
-        if isinstance(payload.get("HIST_MM_BLOB"), str): hblobs["HIST_MM_BLOB"] = payload["HIST_MM_BLOB"]
-        if isinstance(payload.get("HIST_PB_BLOB"), str): hblobs["HIST_PB_BLOB"] = payload["HIST_PB_BLOB"]
-        # IL blobs may be split by tier
-        for t in ("JP","M1","M2"):
-            tk = f"HIST_IL_{t}_BLOB"
-            alt = f"HIST_IL_BLOB_{t}"
-            if isinstance(payload.get(tk), str):
-                hblobs[f"HIST_IL_{t}_BLOB"] = payload[tk]
-            elif isinstance(payload.get(alt), str):
-                hblobs[f"HIST_IL_{t}_BLOB"] = payload[alt]
+    if not (1 <= m <= 12 and 1 <= d <= 31 and 1900 <= y <= 2100):
+        raise ValueError(f"Unrecognized date: {s!r}")
 
-    # ---------- compute simple bands from history ----------
-    mm_rows  = _parse_hist_blob_mm(hblobs.get("HIST_MM_BLOB",""))
-    pb_rows  = _parse_hist_blob_mm(hblobs.get("HIST_PB_BLOB",""))
-    il_rows  = []
-    il_rows += _parse_hist_blob_il(hblobs.get("HIST_IL_JP_BLOB",""))
-    il_rows += _parse_hist_blob_il(hblobs.get("HIST_IL_M1_BLOB",""))
-    il_rows += _parse_hist_blob_il(hblobs.get("HIST_IL_M2_BLOB",""))
+    return f"{m:02d}/{d:02d}/{y:04d}"
 
-    bands = {
-        "MM": list(_sum_band_from_hist(mm_rows)),
-        "PB": list(_sum_band_from_hist(pb_rows)),
-        "IL": list(_sum_band_from_hist(il_rows)),
-    }
+def _dt_key(date_str: str) -> datetime:
+    return datetime.strptime(date_str, "%m/%d/%Y")
 
-    # ---------- save normalized Phase-1 state ----------
-    out = {
-        "phase": "phase1",
-        "latest": latest,   # strings LATEST_* → compatible with any older Phase-2 code
-        "history": hblobs,
-        "bands": bands,
-        "ts": datetime.utcnow().isoformat(timespec="seconds")+"Z",
-    }
-    save_path = os.path.join(_TMP, f"lotto_phase1_{datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')}.json")
-    with open(save_path, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+# ---------------- Storage helpers ---------------- #
 
-    return {"ok": True, "phase": "phase1", "bands": bands, "saved_path": save_path}
+def _load_db() -> None:
+    """Load persisted DB from STORE_PATH into _DB."""
+    global _DB
+    if os.path.exists(STORE_PATH):
+        try:
+            with open(STORE_PATH, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            _DB = {tuple(k.split("|", 2)): v for k, v in raw.items()}
+        except Exception:
+            _DB = {}
+    else:
+        _DB = {}
 
+def _save_db() -> None:
+    """Persist _DB into STORE_PATH."""
+    raw = {"|".join(k): v for k, v in _DB.items()}
+    with open(STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump(raw, f, ensure_ascii=False)
 
-# ----------------------------- Phase 2 (minimal placeholder) ----------------------------- #
+def _key(game: str, date: str, tier: Optional[str]) -> Tuple[str, str, str]:
+    return (game.upper(), date, (tier or "").upper())
 
-def handle_phase2(payload: Dict[str, Any]) -> Dict[str, Any]:
+# ---------------- Import API (CSV) ---------------- #
+
+REQ_COLS = {"game","draw_date","tier","n1","n2","n3","n4","n5","n6","bonus"}
+
+def import_csv_io(file_like, overwrite: bool = False) -> Dict[str, Any]:
     """
-    Minimal Phase-2 placeholder that just reads Phase-1 file and echoes bands + latest.
-    Your project likely has a richer Phase-2; if so, keep yours instead.
+    Back-compat wrapper: accept a file-like object or bytes/str.
     """
-    p1_path = (payload.get("saved_phase1_path") or payload.get("phase1_path") or "").strip()
-    if not p1_path or not os.path.exists(p1_path):
-        return {"ok": False, "error": "FileNotFoundError", "detail": "saved_phase1_path not found"}
+    data = file_like.read() if hasattr(file_like, "read") else file_like
+    if isinstance(data, bytes):
+        text = data.decode("utf-8", errors="replace")
+    else:
+        text = str(data)
+    return import_csv(text, overwrite=overwrite)
 
-    with open(p1_path, "r", encoding="utf-8") as f:
-        p1 = json.load(f)
-
-    # Normally you'd run 100× regeneration stats and build buy lists here.
-    # We just pass through the bands and latest to keep your UI moving.
-    res = {
-        "ok": True,
-        "phase": "phase2",
-        "bands": p1.get("bands", {}),
-        "latest": p1.get("latest", {}),
-        "note": "Minimal Phase-2 placeholder. Replace with your real simulation to compute stats & buy lists.",
-    }
-    save_path = os.path.join(_TMP, f"lotto_phase2_{datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')}.json")
-    with open(save_path, "w", encoding="utf-8") as f:
-        json.dump(res, f, ensure_ascii=False, indent=2)
-    res["saved_path"] = save_path
-    return res
-
-
-# ----------------------------- Phase 3 (confirm) ----------------------------- #
-
-def handle_confirm(payload: Dict[str, Any]) -> Dict[str, Any]:
+def import_csv(text: str, overwrite: bool = False) -> Dict[str, Any]:
     """
-    Confirmation stub: accepts NWJ for MM/PB/IL (string or JSON),
-    and optionally the Phase-2 path to attach.
+    Import a combined master CSV. Header can be in any order, but must include:
+      game, draw_date, tier, n1, n2, n3, n4, n5, n6, bonus
+
+    MM/PB rows:
+      - n1..n5 required, bonus required, n6 should be blank
+      - tier must be blank (ignored)
+    IL rows:
+      - tier in {JP,M1,M2} (if blank, default to JP)
+      - n1..n6 required, bonus must be blank
     """
-    # Phase-2 (optional)
-    p2_path = (payload.get("saved_phase2_path") or payload.get("phase2_path") or "").strip()
-    p2_loaded = bool(p2_path and os.path.exists(p2_path))
+    _load_db()
+    if overwrite:
+        _DB.clear()
 
-    # NWJ (accept strings or arrays)
-    try:
-        mm, _   = _coerce_latest(payload.get("LATEST_MM"), allow_null_bonus=False)
-        pb, _   = _coerce_latest(payload.get("LATEST_PB"), allow_null_bonus=False)
-        iljp, _ = _coerce_latest(payload.get("LATEST_IL_JP"), allow_null_bonus=True)
-        ilm1, _ = _coerce_latest(payload.get("LATEST_IL_M1"), allow_null_bonus=True)
-        ilm2, _ = _coerce_latest(payload.get("LATEST_IL_M2"), allow_null_bonus=True)
-    except Exception as e:
-        return {"ok": False, "error": "ValueError", "detail": str(e)}
+    reader = csv.DictReader(io.StringIO(text))
+    # Validate required columns (order-agnostic)
+    cols = {c.strip().lower() for c in (reader.fieldnames or [])}
+    if not REQ_COLS.issubset(cols):
+        missing = sorted(list(REQ_COLS - cols))
+        raise ValueError(f"Bad CSV header. Missing columns: {missing}")
 
-    result = {
-        "ok": True,
-        "phase": "phase3",
-        "nwj": {"MM": mm, "PB": pb, "IL": {"JP": iljp, "M1": ilm1, "M2": ilm2}},
-        "phase2_loaded": p2_loaded,
-    }
-    save_path = os.path.join(_TMP, f"lotto_phase3_{datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')}.json")
-    with open(save_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    result["saved_path"] = save_path
-    return result
+    added = 0
+    updated = 0
 
+    for i, row in enumerate(reader, start=2):  # 1-based; include header
+        try:
+            game = (row.get("game") or "").strip().upper()
+            if game not in ("MM","PB","IL"):
+                raise ValueError(f"Row {i}: game must be MM/PB/IL")
 
-# ----------------------------- Misc ----------------------------- #
+            date = _norm_date(row.get("draw_date") or row.get("date") or "")
 
-def recent_files(limit: int = 30) -> List[str]:
-    files = sorted(glob.glob(os.path.join(_TMP, "lotto_phase*.json")))
-    return files[-int(limit):]
+            # helper to parse int or None
+            def gi(name: str) -> Optional[int]:
+                v = (row.get(name) or "").strip()
+                return int(v) if v != "" else None
+
+            n1 = gi("n1"); n2 = gi("n2"); n3 = gi("n3"); n4 = gi("n4"); n5 = gi("n5")
+            n6 = gi("n6")
+            bonus = gi("bonus")
+
+            if game in ("MM","PB"):
+                if None in (n1,n2,n3,n4,n5) or bonus is None:
+                    raise ValueError(f"Row {i}: MM/PB require n1..n5 and bonus")
+                tier = ""  # ignored
+                row_norm = {
+                    "game": game,
+                    "date": date,
+                    "tier": tier,
+                    "mains": [n1,n2,n3,n4,n5],
+                    "bonus": bonus,
+                }
+            else:
+                tier = (row.get("tier") or "").strip().upper() or "JP"
+                if tier not in ("JP","M1","M2"):
+                    raise ValueError(f"Row {i}: IL tier must be JP/M1/M2 (or blank for JP)")
+                if None in (n1,n2,n3,n4,n5,n6):
+                    raise ValueError(f"Row {i}: IL requires n1..n6")
+                if bonus not in (None,):  # IL bonus must be blank
+                    raise ValueError(f"Row {i}: IL must not have bonus")
+                row_norm = {
+                    "game": game,
+                    "date": date,
+                    "tier": tier,
+                    "mains": [n1,n2,n3,n4,n5,n6],
+                    "bonus": None,
+                }
+
+            k = _key(game, date, tier)
+            if k in _DB:
+                _DB[k] = row_norm
+                updated += 1
+            else:
+                _DB[k] = row_norm
+                added += 1
+
+        except Exception as e:
+            # Include row index context to debug quickly
+            raise ValueError(f"Import error on CSV row {i}: {e}") from e
+
+    _save_db()
+    return {"ok": True, "added": added, "updated": updated, "total": len(_DB)}
+
+# ---------------- Query API (used by UI) ---------------- #
+
+def get_by_date(game: str, date: str, tier: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Return normalized row dict or None.
+    - MM/PB: ignore tier
+    - IL: require tier ∈ {JP,M1,M2}; if blank, default JP
+    """
+    _load_db()
+    g = (game or "").strip().upper()
+    d = _norm_date(date)
+    t = (tier or "").strip().upper() if g == "IL" else ""
+
+    if g == "IL" and t == "":
+        t = "JP"
+
+    row = _DB.get(_key(g, d, t))
+    if not row and g.startswith("IL_"):  # back-compat: IL_JP, IL_M1, IL_M2
+        t2 = g.split("_", 1)[1]
+        row = _DB.get(_key("IL", d, t2))
+    return row
+
+def get_history(game: str, start_date: str, limit: int = 20) -> Dict[str, Any]:
+    """
+    Return last `limit` rows on/older than `start_date` (newest first),
+    plus the “blob” text your UI displays.
+    For MM/PB:  mm-dd-yy  a-b-c-d-e  BB
+    For IL:     mm-dd-yy  A-B-C-D-E-F
+    """
+    _load_db()
+    g_in = (game or "").strip().upper()
+    d0 = _norm_date(start_date)
+    start_dt = _dt_key(d0)
+
+    # Gather rows per game/tier
+    if g_in in ("MM","PB"):
+        rows = [v for (kg, kd, kt), v in _DB.items() if kg == g_in]
+    else:
+        tier_filter = ""
+        g = g_in
+        if g_in.startswith("IL_"):
+            g = "IL"
+            tier_filter = g_in.split("_",1)[1]
+        rows = [v for (kg, kd, kt), v in _DB.items() if kg == g and (not tier_filter or kt == tier_filter)]
+
+    # Sort newest → oldest; then filter on/older than start_date
+    rows.sort(key=lambda r: _dt_key(r["date"]), reverse=True)
+    selected: List[Dict[str, Any]] = []
+    for r in rows:
+        if _dt_key(r["date"]) <= start_dt:
+            selected.append(r)
+        if len(selected) >= limit:
+            break
+
+    # Build blob text
+    lines: List[str] = []
+    for r in selected:
+        ds = datetime.strptime(r["date"], "%m/%d/%Y").strftime("%m-%d-%y")
+        if r["game"] in ("MM","PB"):
+            a,b,c,d,e = r["mains"]; bb = r["bonus"]
+            lines.append(f"{ds}  {a:02d}-{b:02d}-{c:02d}-{d:02d}-{e:02d}  {bb:02d}")
+        else:
+            a,b,c,d,e,f = r["mains"]
+            lines.append(f"{ds}  {a:02d}-{b:02d}-{c:02d}-{d:02d}-{e:02d}-{f:02d}")
+
+    return {"rows": selected, "blob": "\n".join(lines)}
