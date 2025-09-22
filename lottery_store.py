@@ -203,28 +203,45 @@ def get_by_date(game: str, date: str, tier: Optional[str] = None) -> Optional[Di
         row = _DB.get(_key("IL", d, t2))
     return row
 
-def get_history(game: str, start_date: str, limit: int = 20) -> Dict[str, Any]:
+def get_history(
+    game: str,
+    start_date: str,
+    limit: int = 20,
+    tier: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Return last `limit` rows on/older than `start_date` (newest first),
     plus the “blob” text your UI displays.
-    For MM/PB:  mm-dd-yy  a-b-c-d-e  BB
-    For IL:     mm-dd-yy  A-B-C-D-E-F
+
+    Accepts either:
+      - game=IL&tier=JP (or M1/M2)
+      - game=IL_JP / IL_M1 / IL_M2
+      - game=MM or PB (tier ignored)
     """
     _load_db()
     g_in = (game or "").strip().upper()
     d0 = _norm_date(start_date)
     start_dt = _dt_key(d0)
 
-    # Gather rows per game/tier
-    if g_in in ("MM","PB"):
-        rows = [v for (kg, kd, kt), v in _DB.items() if kg == g_in]
-    else:
+    # Resolve game + tier
+    if g_in in ("MM", "PB"):
+        base = g_in
         tier_filter = ""
-        g = g_in
+    else:
         if g_in.startswith("IL_"):
-            g = "IL"
-            tier_filter = g_in.split("_",1)[1]
-        rows = [v for (kg, kd, kt), v in _DB.items() if kg == g and (not tier_filter or kt == tier_filter)]
+            base = "IL"
+            tier_filter = g_in.split("_", 1)[1].strip().upper()
+        else:  # "IL" with optional 'tier=' query param
+            base = "IL"
+            tier_filter = (tier or "JP").strip().upper()
+
+    # Gather rows for the selection
+    if base in ("MM", "PB"):
+        rows = [v for (kg, kd, kt), v in _DB.items() if kg == base]
+    else:
+        # IL with tier filter (JP/M1/M2)
+        rows = [v for (kg, kd, kt), v in _DB.items()
+                if kg == "IL" and (not tier_filter or kt == tier_filter)]
 
     # Sort newest → oldest; then filter on/older than start_date
     rows.sort(key=lambda r: _dt_key(r["date"]), reverse=True)
@@ -239,11 +256,11 @@ def get_history(game: str, start_date: str, limit: int = 20) -> Dict[str, Any]:
     lines: List[str] = []
     for r in selected:
         ds = datetime.strptime(r["date"], "%m/%d/%Y").strftime("%m-%d-%y")
-        if r["game"] in ("MM","PB"):
-            a,b,c,d,e = r["mains"]; bb = r["bonus"]
+        if r["game"] in ("MM", "PB"):
+            a, b, c, d, e = r["mains"]; bb = r["bonus"]
             lines.append(f"{ds}  {a:02d}-{b:02d}-{c:02d}-{d:02d}-{e:02d}  {bb:02d}")
         else:
-            a,b,c,d,e,f = r["mains"]
+            a, b, c, d, e, f = r["mains"]
             lines.append(f"{ds}  {a:02d}-{b:02d}-{c:02d}-{d:02d}-{e:02d}-{f:02d}")
 
     return {"rows": selected, "blob": "\n".join(lines)}
