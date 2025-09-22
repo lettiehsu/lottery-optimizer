@@ -1,144 +1,194 @@
-/* ------------------------------
-   Lottery Optimizer – Phase 1 UI
-   (safe date handling: never use new Date())
---------------------------------*/
-
 (() => {
-  // ----- helpers -----
-  const $ = (sel) => document.querySelector(sel);
-  const setVal = (sel, v) => { const n = $(sel); if (n) n.value = v; };
-  const getStr = (sel) => {
-    const n = $(sel);
-    return (n && typeof n.value === 'string') ? n.value.trim() : '';
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  const setLog = (obj, isError=false) => {
+    logEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+    logEl.className = isError ? "mono error" : "mono";
   };
-  const msg = (t, kind = 'info') => {
-    const m = $('#phase1_msg');
-    if (!m) return;
-    m.textContent = t || '';
-    m.className = kind; // style with .info, .warn, .err if you like
-  };
-  const fetchJSON = async (url) => {
-    const r = await fetch(url);
-    if (!r.ok) {
-      const text = await r.text();
-      throw new Error(`${r.status} ${r.statusText}: ${text}`);
+
+  async function fetchJSON(url, opts={}) {
+    try {
+      const res = await fetch(url, opts);
+      const txt = await res.text();
+      let data = null;
+      try { data = JSON.parse(txt); } catch { /* not json */ }
+      if (!res.ok) {
+        // Prefer server JSON error, else status text
+        throw new Error(data?.detail || data?.error || `${res.status} ${res.statusText}`);
+      }
+      // Some old server code returns plain text; normalize to object
+      return (data ?? { ok:true, text:txt });
+    } catch (e) {
+      throw new Error(e.message || String(e));
     }
-    return r.json();
-  };
+  }
 
-  // ----- element IDs (adjust here if yours differ) -----
-  const el = {
-    // date inputs
-    mmDate:     '#mm_date',
-    pbDate:     '#pb_date',
-    ilJPDate:   '#il_jp_date',
-    ilM1Date:   '#il_m1_date',
-    ilM2Date:   '#il_m2_date',
-
-    // preview outputs
-    mmPreview:  '#mm_preview',
-    pbPreview:  '#pb_preview',
-    ilJPPrev:   '#il_jp_preview',
-    ilM1Prev:   '#il_m1_preview',
-    ilM2Prev:   '#il_m2_preview',
-
-    // retrieve buttons
-    mmBtn:      '#btn_mm_retrieve',
-    pbBtn:      '#btn_pb_retrieve',
-    ilJPBtn:    '#btn_il_jp_retrieve',
-    ilM1Btn:    '#btn_il_m1_retrieve',
-    ilM2Btn:    '#btn_il_m2_retrieve',
-
-    // history blocks
-    mmHistDate: '#hist_mm_date',
-    pbHistDate: '#hist_pb_date',
-    ilJPHDate:  '#hist_il_jp_date',
-    ilM1HDate:  '#hist_il_m1_date',
-    ilM2HDate:  '#hist_il_m2_date',
-
-    mmHistLoad: '#btn_hist_mm_load',
-    pbHistLoad: '#btn_hist_pb_load',
-    ilJPHLoad:  '#btn_hist_il_jp_load',
-    ilM1HLoad:  '#btn_hist_il_m1_load',
-    ilM2HLoad:  '#btn_hist_il_m2_load',
-
-    mmHistBlob: '#hist_mm_blob',
-    pbHistBlob: '#hist_pb_blob',
-    ilJPHBlob:  '#hist_il_jp_blob',
-    ilM1HBlob:  '#hist_il_m1_blob',
-    ilM2HBlob:  '#hist_il_m2_blob',
-  };
-
-  // ----- wire up “Retrieve” for MM/PB -----
-  const retrieveMM = async () => {
+  // ---------- CSV import ----------
+  $("btnImport").addEventListener("click", async () => {
+    const f = $("csvFile").files?.[0];
+    if (!f) { setLog("Please choose a CSV file.", true); return; }
+    const form = new FormData();
+    form.append("file", f);
+    form.append("overwrite", $("overwrite").checked ? "true" : "false");
     try {
-      msg('');
-      const date = getStr(el.mmDate);         // <-- raw string (MM/DD/YYYY)
-      if (!date) throw new Error('Pick Mega Millions date.');
-      const q = `/store/get_by_date?game=MM&date=${encodeURIComponent(date)}`;
-      const j = await fetchJSON(q);
-      // store returns: { ok:true, row:{ mains:[...], bonus:number|null, ... } }
-      const mains = j.row.mains || [];
-      const bonus = (j.row.bonus === null || j.row.bonus === undefined) ? 'null' : j.row.bonus;
-      setVal(el.mmPreview, `[${mains.join(',')}], ${bonus}`);
-    } catch (e) { msg(`Retrieve failed (MM): ${e.message}`, 'err'); }
+      const j = await fetchJSON("/store/import_csv", { method:"POST", body: form });
+      $("importResult").textContent = JSON.stringify(j, null, 2);
+    } catch (e) {
+      $("importResult").textContent = `Upload failed: ${e.message}`;
+    }
+  });
+
+  // ---------- Helpers ----------
+  const ensureArrayNums = (arr) => Array.isArray(arr) ? arr.map(x => Number(x)) : [];
+  const formatLatest = (mains, bonusOrNull) => {
+    const a = ensureArrayNums(mains);
+    return `[[${a.join(",")}], ${bonusOrNull === null ? "null" : Number(bonusOrNull)}]`;
   };
 
-  const retrievePB = async () => {
+  async function retrieveByDate(game, date, tier=null) {
+    const p = new URLSearchParams();
+    p.set("game", game);
+    p.set("date", date);
+    if (tier) p.set("tier", tier);
+    return await fetchJSON(`/store/get_by_date?${p.toString()}`);
+  }
+
+  async function loadHistory(game, fromDate, limit=20, tier=null) {
+    const p = new URLSearchParams();
+    p.set("game", game);
+    p.set("date", fromDate);     // server also accepts "from"; we send "date" for consistency
+    p.set("limit", String(limit));
+    if (tier) p.set("tier", tier);
+    return await fetchJSON(`/store/get_history?${p.toString()}`);
+  }
+
+  // ---------- Retrieve buttons ----------
+  $("btnRetrieveMM").addEventListener("click", async () => {
+    const d = $("mmDate").value.trim();
+    if (!d) return setLog("Pick a MM date.", true);
     try {
-      msg('');
-      const date = getStr(el.pbDate);
-      if (!date) throw new Error('Pick Powerball date.');
-      const q = `/store/get_by_date?game=PB&date=${encodeURIComponent(date)}`;
-      const j = await fetchJSON(q);
-      const mains = j.row.mains || [];
-      const bonus = (j.row.bonus === null || j.row.bonus === undefined) ? 'null' : j.row.bonus;
-      setVal(el.pbPreview, `[${mains.join(',')}], ${bonus}`);
-    } catch (e) { msg(`Retrieve failed (PB): ${e.message}`, 'err'); }
-  };
+      const j = await retrieveByDate("MM", d);
+      $("mmPreview").value = formatLatest(j.mains, j.bonus ?? j.mb ?? null);
+    } catch (e) { setLog(`Retrieve failed (MM): ${e.message}`, true); }
+  });
 
-  // ----- wire up “Retrieve” for IL tiers -----
-  const retrieveIL = (tier, dateSel, outSel, label) => async () => {
+  $("btnRetrievePB").addEventListener("click", async () => {
+    const d = $("pbDate").value.trim();
+    if (!d) return setLog("Pick a PB date.", true);
     try {
-      msg('');
-      const date = getStr(dateSel);
-      if (!date) throw new Error(`Pick ${label} date.`);
-      const q = `/store/get_by_date?game=IL&tier=${encodeURIComponent(tier)}&date=${encodeURIComponent(date)}`;
-      const j = await fetchJSON(q);
-      const mains = j.row.mains || [];
-      // IL tiers have no bonus → use null
-      setVal(outSel, `[${mains.join(',')}], null`);
-    } catch (e) { msg(`Retrieve failed (${label}): ${e.message}`, 'err'); }
-  };
+      const j = await retrieveByDate("PB", d);
+      $("pbPreview").value = formatLatest(j.mains, j.bonus ?? j.pb ?? null);
+    } catch (e) { setLog(`Retrieve failed (PB): ${e.message}`, true); }
+  });
 
-  // ----- history “Load 20” for blobs -----
-  const loadHist = (game, dateSel, outSel, extraParams = '') => async () => {
+  $("btnRetrieveILJP").addEventListener("click", async () => {
+    const d = $("ilJPDate").value.trim();
+    if (!d) return setLog("Pick IL JP date.", true);
     try {
-      msg('');
-      const from = getStr(dateSel);
-      if (!from) throw new Error('Pick a start date (3rd newest).');
-      const q = `/store/get_history?game=${encodeURIComponent(game)}&from=${encodeURIComponent(from)}&limit=20${extraParams}`;
-      const j = await fetchJSON(q);
-      // Expect j.blob to be the formatted multi-line text
-      setVal(outSel, j.blob || '');
-    } catch (e) { msg(`Load 20 failed (${game}): ${e.message}`, 'err'); }
-  };
+      const j = await retrieveByDate("IL", d, "JP"); // server also accepts game=IL_JP
+      $("ilJPPreview").value = formatLatest(j.mains, null);
+    } catch (e) { setLog(`Retrieve failed (IL_JP): ${e.message}`, true); }
+  });
 
-  // ----- attach listeners -----
-  const on = (sel, fn) => { const n = $(sel); if (n) n.addEventListener('click', fn); };
+  $("btnRetrieveILM1").addEventListener("click", async () => {
+    const d = $("ilM1Date").value.trim();
+    if (!d) return setLog("Pick IL M1 date.", true);
+    try {
+      const j = await retrieveByDate("IL", d, "M1");
+      $("ilM1Preview").value = formatLatest(j.mains, null);
+    } catch (e) { setLog(`Retrieve failed (IL_M1): ${e.message}`, true); }
+  });
 
-  on(el.mmBtn, retrieveMM);
-  on(el.pbBtn, retrievePB);
-  on(el.ilJPBtn, retrieveIL('JP', el.ilJPDate, el.ilJPPrev, 'IL JP'));
-  on(el.ilM1Btn, retrieveIL('M1', el.ilM1Date, el.ilM1Prev, 'IL M1'));
-  on(el.ilM2Btn, retrieveIL('M2', el.ilM2Date, el.ilM2Prev, 'IL M2'));
+  $("btnRetrieveILM2").addEventListener("click", async () => {
+    const d = $("ilM2Date").value.trim();
+    if (!d) return setLog("Pick IL M2 date.", true);
+    try {
+      const j = await retrieveByDate("IL", d, "M2");
+      $("ilM2Preview").value = formatLatest(j.mains, null);
+    } catch (e) { setLog(`Retrieve failed (IL_M2): ${e.message}`, true); }
+  });
 
-  on(el.mmHistLoad, loadHist('MM', el.mmHistDate, el.mmHistBlob));
-  on(el.pbHistLoad, loadHist('PB', el.pbHistDate, el.pbHistBlob));
-  on(el.ilJPHLoad,  loadHist('IL_JP', el.ilJPHDate, el.ilJPHBlob));
-  on(el.ilM1HLoad,  loadHist('IL_M1', el.ilM1HDate, el.ilM1HBlob));
-  on(el.ilM2HLoad,  loadHist('IL_M2', el.ilM2HDate, el.ilM2HBlob));
+  // ---------- Load 20 history ----------
+  $("btnLoadMM20").addEventListener("click", async () => {
+    const d = $("histMMFrom").value.trim();
+    if (!d) return setLog("Pick MM history start date.", true);
+    try {
+      const j = await loadHistory("MM", d, 20);
+      $("histMM").value = j.blob || (j.rows || []).join("\n");
+    } catch (e) { setLog(`Load failed (MM): ${e.message}`, true); }
+  });
 
-  // ready
-  msg('');
+  $("btnLoadPB20").addEventListener("click", async () => {
+    const d = $("histPBFrom").value.trim();
+    if (!d) return setLog("Pick PB history start date.", true);
+    try {
+      const j = await loadHistory("PB", d, 20);
+      $("histPB").value = j.blob || (j.rows || []).join("\n");
+    } catch (e) { setLog(`Load failed (PB): ${e.message}`, true); }
+  });
+
+  $("btnLoadILJP20").addEventListener("click", async () => {
+    const d = $("histILJPFrom").value.trim();
+    if (!d) return setLog("Pick IL JP history start date.", true);
+    try {
+      const j = await loadHistory("IL", d, 20, "JP");
+      $("histILJP").value = j.blob || (j.rows || []).join("\n");
+    } catch (e) { setLog(`Load failed (IL_JP): ${e.message}`, true); }
+  });
+
+  $("btnLoadILM120").addEventListener("click", async () => {
+    const d = $("histILM1From").value.trim();
+    if (!d) return setLog("Pick IL M1 history start date.", true);
+    try {
+      const j = await loadHistory("IL", d, 20, "M1");
+      $("histILM1").value = j.blob || (j.rows || []).join("\n");
+    } catch (e) { setLog(`Load failed (IL_M1): ${e.message}`, true); }
+  });
+
+  $("btnLoadILM220").addEventListener("click", async () => {
+    const d = $("histILM2From").value.trim();
+    if (!d) return setLog("Pick IL M2 history start date.", true);
+    try {
+      const j = await loadHistory("IL", d, 20, "M2");
+      $("histILM2").value = j.blob || (j.rows || []).join("\n");
+    } catch (e) { setLog(`Load failed (IL_M2): ${e.message}`, true); }
+  });
+
+  // ---------- Run Phase 1 ----------
+  $("btnRunP1").addEventListener("click", async () => {
+    const payload = {
+      // EXACT names the core expects:
+      LATEST_MM: $("mmPreview").value.trim(),
+      LATEST_PB: $("pbPreview").value.trim(),
+      LATEST_IL_JP: $("ilJPPreview").value.trim(),
+      LATEST_IL_M1: $("ilM1Preview").value.trim(),
+      LATEST_IL_M2: $("ilM2Preview").value.trim(),
+      FEED_MM: $("feedMM").value,
+      FEED_PB: $("feedPB").value,
+      FEED_IL: $("feedIL").value,
+      HIST_MM_BLOB: $("histMM").value,
+      HIST_PB_BLOB: $("histPB").value,
+      // Join the three IL blobs into one big HIST_IL_BLOB (the core expects a single field)
+      HIST_IL_BLOB: [ $("histILJP").value, $("histILM1").value, $("histILM2").value ].filter(Boolean).join("\n")
+    };
+
+    // guard the LATEST_* strings — avoids the “must be a string like '[..]…'” error
+    for (const k of ["LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"]) {
+      if (!payload[k] || !payload[k].includes("[[")) {
+        return setLog(`Missing or malformed ${k}. Click Retrieve for each game first.`, true);
+      }
+    }
+
+    try {
+      const j = await fetchJSON("/run_json", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      setLog(j);
+      if (j?.ok && j?.saved_path) $("p1Path").value = j.saved_path;
+    } catch (e) {
+      setLog(e.message, true);
+    }
+  });
 })();
