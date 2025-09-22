@@ -140,9 +140,10 @@ def get_history(game_key: str, start_date: str, limit: int = 20):
             if bonus is not None:
                 line = f"{'-'.join(f'{n:02d}' for n in mains)} {bonus:02d}"
             else:
-                line = f"{$'-'.join(f'{n:02d}' for n in mains)}"  # should not happen for MM/PB
+                # Shouldn't happen, but format without bonus if missing
+                line = "-".join(f"{n:02d}" for n in mains)
         else:
-            line = f"{'-'.join(f'{n:02d}' for n in mains)}"
+            line = "-".join(f"{n:02d}" for n in mains)
         out.append(line)
         if len(out) >= limit:
             break
