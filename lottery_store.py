@@ -1,129 +1,150 @@
-# lottery_store.py
-import csv, io
+import csv
 from datetime import datetime
 
-# Assume you have some global or injected storage dict/list; adjust as needed.
-# For example:
-# DB = {"MM": [], "PB": [], "IL_JP": [], "IL_M1": [], "IL_M2": []}
+# In-memory database (swap for real persistence later if you want)
+try:
+    DB
+except NameError:
+    DB = {"MM": {}, "PB": {}, "IL_JP": {}, "IL_M1": {}, "IL_M2": {}}
+# DB[bucket][date_key] = {"date": "MM/DD/YYYY", "mains": [..], "bonus": int|None}
 
-def _parse_row(row):
-    """Return normalized record or None; raise on unrecoverable schema issues."""
-    # Expected columns from your combined master:
-    # game, draw_date, tier, n1, n2, n3, n4, n5, n6, bonus
-    game = row.get("game", "").strip().upper()
-    date_str = row.get("draw_date", "").strip()
-    tier = (row.get("tier") or "").strip().upper()  # "", "JP", "M1", "M2"
+def _date_key_mmddyyyy(d: datetime) -> str:
+    return d.strftime("%m/%d/%Y")
+
+def _parse_row(row: dict):
+    """
+    Normalize one CSV row to (bucket, record) or None.
+    Input headers (case-insensitive): game, draw_date, tier, n1..n6, bonus
+    """
+    # Normalize keys to lower
+    lr = {k.lower(): v for k, v in row.items()}
+
+    game = (lr.get("game") or "").strip().upper()
+    date_str = (lr.get("draw_date") or "").strip()
+    tier = (lr.get("tier") or "").strip().upper()
 
     if not game or not date_str:
         return None
 
-    # Normalize game for IL tiers
-    if game == "IL":
-        if tier == "JP":
-            game_key = "IL_JP"
-        elif tier == "M1":
-            game_key = "IL_M1"
-        elif tier == "M2":
-            game_key = "IL_M2"
-        else:
-            # rows like IL,9/20/2025,,6,14,17,18,29,30,  (ignored if not a tier row)
-            return None
-    else:
-        game_key = game  # "MM" or "PB"
-
-    # Date normalize MM/DD/YYYY
+    # Parse date MM/DD/YYYY
     try:
-        draw_dt = datetime.strptime(date_str, "%m/%d/%Y").date()
+        dt = datetime.strptime(date_str, "%m/%d/%Y")
     except ValueError:
-        # Try other common formats if needed
         return None
+    dkey = _date_key_mmddyyyy(dt)
 
-    # Read numbers
-    def to_int(x):
+    # number fields
+    def to_i(x):
         x = (x or "").strip()
-        return int(x) if x.isdigit() else None
+        # allow "01" etc
+        return int(x) if x and x.replace("-", "").isdigit() else None
 
-    n1 = to_int(row.get("n1"))
-    n2 = to_int(row.get("n2"))
-    n3 = to_int(row.get("n3"))
-    n4 = to_int(row.get("n4"))
-    n5 = to_int(row.get("n5"))
-    n6 = to_int(row.get("n6"))
-    bonus = to_int(row.get("bonus"))
+    n1 = to_i(lr.get("n1"))
+    n2 = to_i(lr.get("n2"))
+    n3 = to_i(lr.get("n3"))
+    n4 = to_i(lr.get("n4"))
+    n5 = to_i(lr.get("n5"))
+    n6 = to_i(lr.get("n6"))
+    bonus = to_i(lr.get("bonus"))
 
-    mains = [x for x in (n1, n2, n3, n4, n5) if x is not None]
-    # IL tiers have 6 mains; MM/PB have 5 mains
-    if game_key.startswith("IL_"):
-        # expect 6 mains
-        if n6 is None or len(mains) != 5:
-            # For IL we want 6 numbers; include n6
-            mains = [x for x in (n1, n2, n3, n4, n5, n6) if x is not None]
-        bonus_val = None
-    else:
-        bonus_val = bonus
+    if game == "IL":
+        # Only keep tiered IL rows (JP/M1/M2)
+        if tier not in ("JP", "M1", "M2"):
+            return None
+        bucket = f"IL_{tier}"
+        mains = [x for x in (n1, n2, n3, n4, n5, n6) if x is not None]
+        # IL requires 6 mains
+        if len(mains) != 6:
+            return None
+        rec = {"date": dkey, "mains": mains, "bonus": None}
+        return bucket, rec
 
-    return game_key, {
-        "date": draw_dt.strftime("%m/%d/%Y"),
-        "mains": mains,
-        "bonus": bonus_val
-    }
+    if game in ("MM", "PB"):
+        mains = [x for x in (n1, n2, n3, n4, n5) if x is not None]
+        if len(mains) != 5:
+            return None
+        # bonus allowed to be None
+        rec = {"date": dkey, "mains": mains, "bonus": bonus}
+        return game, rec
 
-def import_csv_io(file_like, overwrite=False):
+    return None
+
+def import_csv_io(file_like, overwrite: bool = False):
     """
-    Parse a CSV from a file-like object and upsert into the store.
+    Parse a combined master CSV from a file-like object and upsert into DB.
     Returns {"ok": True, "added": N, "updated": M, "total": T}
     """
     reader = csv.DictReader(file_like)
     added = updated = 0
-
-    # Provide your own storage implementation below; here we assume dict of dicts keyed by date.
-    # Example in-memory structure:
-    global DB
-    try:
-        DB
-    except NameError:
-        DB = {"MM": {}, "PB": {}, "IL_JP": {}, "IL_M1": {}, "IL_M2": {}}
-
     for row in reader:
         parsed = _parse_row(row)
         if not parsed:
             continue
-        game_key, rec = parsed
+        bucket, rec = parsed
         key = rec["date"]
-
-        if key in DB[game_key]:
+        exists = key in DB[bucket]
+        if exists:
             if overwrite:
-                DB[game_key][key] = rec
+                DB[bucket][key] = rec
                 updated += 1
         else:
-            DB[game_key][key] = rec
+            DB[bucket][key] = rec
             added += 1
 
-    total = sum(len(DB[g]) for g in DB)
+    total = sum(len(DB[k]) for k in DB)
     return {"ok": True, "added": added, "updated": updated, "total": total}
 
-# Convenience getters the UI calls:
+def import_csv(text: str, overwrite: bool = False):
+    """
+    Optional convenience: accept raw CSV text and route to import_csv_io.
+    """
+    import io
+    return import_csv_io(io.StringIO(text), overwrite=overwrite)
+
 def get_by_date(game_key: str, date_str: str):
-    global DB
+    """
+    Return one row as {date, mains, bonus} or None.
+    game_key in {"MM","PB","IL_JP","IL_M1","IL_M2"}.
+    date_str must be MM/DD/YYYY.
+    """
     return DB.get(game_key, {}).get(date_str)
 
-def get_history(game_key: str, from_date: str, limit: int = 20):
-    global DB
-    # return newest-first up to limit
+def get_history(game_key: str, start_date: str, limit: int = 20):
+    """
+    Return newest→older rows starting at start_date (inclusive), up to limit,
+    and a HIST_* style text blob for the UI.
+    For MM/PB: "01-02-03-04-05 09"
+    For IL_* : "01-02-03-04-05-06"
+    """
+    # Validate/normalize input date
+    try:
+        _ = datetime.strptime(start_date, "%m/%d/%Y")
+    except ValueError:
+        return {"rows": [], "blob": ""}
+
     rows = DB.get(game_key, {})
     # Sort by date descending
-    sorted_keys = sorted(rows.keys(),
-                         key=lambda d: datetime.strptime(d, "%m/%d/%Y"),
-                         reverse=True)
-    # Start from from_date (inclusive) then take limit
+    keys = sorted(rows.keys(), key=lambda s: datetime.strptime(s, "%m/%d/%Y"), reverse=True)
+
     out = []
-    passed_start = False
-    for k in sorted_keys:
-        if not passed_start:
-            passed_start = (k == from_date)
-            if not passed_start:
+    started = False
+    for k in keys:
+        if not started:
+            started = (k == start_date)
+            if not started:
                 continue
-        out.append(rows[k])
+        rec = rows[k]
+        mains = rec["mains"]
+        if game_key in ("MM", "PB"):
+            bonus = rec.get("bonus")
+            if bonus is not None:
+                line = f"{'-'.join(f'{n:02d}' for n in mains)} {bonus:02d}"
+            else:
+                line = f"{$'-'.join(f'{n:02d}' for n in mains)}"  # should not happen for MM/PB
+        else:
+            line = f"{'-'.join(f'{n:02d}' for n in mains)}"
+        out.append(line)
         if len(out) >= limit:
             break
-    return out
+
+    return {"rows": out, "blob": "\n".join(out)}
