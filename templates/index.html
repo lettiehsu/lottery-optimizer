@@ -24,13 +24,12 @@
     .row{ display:grid; gap:12px }
     .row.cols-2{ grid-template-columns: 1fr 1fr }
     .row.cols-3{ grid-template-columns: repeat(3,1fr) }
-    .row.cols-4{ grid-template-columns: repeat(4,1fr) }
     .card{
       background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px;
     }
     .pill{ display:inline-block; padding:4px 8px; border:1px solid var(--line); border-radius:999px; font-size:12px; background:#fff }
     label{ font-size:12px; color:var(--sub); display:block; margin-bottom:6px }
-    input[type="text"], textarea, select{
+    input[type="text"], input[type="number"], textarea, select{
       width:100%; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink);
     }
     textarea{ min-height:112px; white-space:pre; }
@@ -38,8 +37,6 @@
     .btn.primary{ background:var(--accent); color:#fff; border-color:#0b0f19 }
     .tiny{ font-size:12px; color:var(--sub) }
     .mt{ margin-top:12px } .mt-lg{ margin-top:18px } .mt-xl{ margin-top:28px }
-    .grid-3{ display:grid; gap:12px; grid-template-columns: repeat(3, 1fr) }
-    .grid-2{ display:grid; gap:12px; grid-template-columns: repeat(2, 1fr) }
     .right{ text-align:right }
     .flex{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     .w-120{ width:120px }
@@ -56,7 +53,7 @@
     .badge.ok{ background:#ecfdf5; border-color:var(--ok); color:#065f46 }
     .badge.no{ background:#fef2f2; border-color:var(--bad); color:#7f1d1d }
     .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace }
-    .inline{ display:inline-block }
+    .muted{ color:var(--sub); font-size:12px }
   </style>
 </head>
 <body>
@@ -80,7 +77,7 @@
     <h2 class="mt-lg">Phase 1 — Evaluation</h2>
 
     <div class="row cols-2">
-      <!-- Left: MM/PB newest with dates -->
+      <!-- Left: MM/PB -->
       <div class="card">
         <div class="pill">The 2nd Newest jackpots — with per-game dates</div>
 
@@ -160,9 +157,11 @@
           <div class="pill">History blobs — MM</div>
           <div class="right" style="flex:1"></div>
           <input id="hist_mm_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button data-game="MM" class="btn btnLoad20">Load 20</button>
+          <input id="hist_mm_limit" type="number" value="50" min="1" class="w-120" />
+          <button data-game="MM" class="btn btnLoad">Load</button>
         </div>
-        <textarea id="hist_mm_blob" class="mono mt" placeholder="mm-dd-yy  n1-n2-n3-n4-n5  MB"></textarea>
+        <div class="muted mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  MB</span></div>
+        <textarea id="hist_mm_blob" class="mono mt" placeholder=""></textarea>
       </div>
 
       <!-- PB -->
@@ -171,33 +170,38 @@
           <div class="pill">History blobs — PB</div>
           <div class="right" style="flex:1"></div>
           <input id="hist_pb_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button data-game="PB" class="btn btnLoad20">Load 20</button>
+          <input id="hist_pb_limit" type="number" value="50" min="1" class="w-120" />
+          <button data-game="PB" class="btn btnLoad">Load</button>
         </div>
-        <textarea id="hist_pb_blob" class="mono mt" placeholder="mm-dd-yy  n1-n2-n3-n4-n5  PB"></textarea>
+        <div class="muted mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  PB</span></div>
+        <textarea id="hist_pb_blob" class="mono mt" placeholder=""></textarea>
       </div>
 
       <!-- IL (JP/M1/M2) -->
       <div class="card">
-        <div class="pill">HIST_IL_BLOB (JP / M1 / M2)</div>
+        <div class="pill">HIST_IL_BLOB (JP / M1 / M2) — use the 3rd-newest date then load</div>
 
         <div class="flex mt">
           <label class="inline">JP</label>
           <input id="hist_il_jp_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button data-game="IL_JP" class="btn btnLoad20">Load 20</button>
+          <input id="hist_il_jp_limit" type="number" value="50" min="1" class="w-120" />
+          <button data-game="IL_JP" class="btn btnLoad">Load</button>
         </div>
         <textarea id="hist_il_jp_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
 
         <div class="flex mt">
           <label class="inline">M1</label>
           <input id="hist_il_m1_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button data-game="IL_M1" class="btn btnLoad20">Load 20</button>
+          <input id="hist_il_m1_limit" type="number" value="50" min="1" class="w-120" />
+          <button data-game="IL_M1" class="btn btnLoad">Load</button>
         </div>
         <textarea id="hist_il_m1_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
 
         <div class="flex mt">
           <label class="inline">M2</label>
           <input id="hist_il_m2_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button data-game="IL_M2" class="btn btnLoad20">Load 20</button>
+          <input id="hist_il_m2_limit" type="number" value="50" min="1" class="w-120" />
+          <button data-game="IL_M2" class="btn btnLoad">Load</button>
         </div>
         <textarea id="hist_il_m2_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
       </div>
@@ -212,24 +216,45 @@
       </div>
     </div>
 
-    <!-- Phase 1 — Results (pretty light panel) -->
+    <!-- Phase 1 — Results + Stats -->
     <h2 class="mt">Phase 1 — Results</h2>
     <div class="result-light">
       <div class="result-grid">
         <div>
           <div class="result-title">Mega Millions — NJ line</div>
           <pre id="p1_mm_line" class="result-pre">—</pre>
-          <div class="mt"><span id="p1_mm_exact" class="badge">Exact: —</span></div>
+          <div class="mt">
+            <span id="p1_mm_exact" class="badge">Exact: —</span>
+            <span class="tiny" style="margin-left:8px;">Batch: <span id="p1_mm_batch">—</span> • Position: <span id="p1_mm_pos">—</span></span>
+          </div>
+          <div class="mt">
+            <div class="muted">Stats (3, 3+MB, 4, 4+MB, 5, 5+MB)</div>
+            <pre id="p1_mm_stats" class="result-pre">—</pre>
+          </div>
         </div>
         <div>
           <div class="result-title">Powerball — NJ line</div>
           <pre id="p1_pb_line" class="result-pre">—</pre>
-          <div class="mt"><span id="p1_pb_exact" class="badge">Exact: —</span></div>
+          <div class="mt">
+            <span id="p1_pb_exact" class="badge">Exact: —</span>
+            <span class="tiny" style="margin-left:8px;">Batch: <span id="p1_pb_batch">—</span> • Position: <span id="p1_pb_pos">—</span></span>
+          </div>
+          <div class="mt">
+            <div class="muted">Stats (3, 3+PB, 4, 4+PB, 5, 5+PB)</div>
+            <pre id="p1_pb_stats" class="result-pre">—</pre>
+          </div>
         </div>
         <div>
           <div class="result-title">IL Lotto — NJ lines (JP / M1 / M2)</div>
           <pre id="p1_il_lines" class="result-pre">—</pre>
-          <div class="mt"><span id="p1_il_exact" class="badge">All three exact: —</span></div>
+          <div class="mt">
+            <span id="p1_il_exact" class="badge">All three exact: —</span>
+            <span class="tiny" style="margin-left:8px;">Batch JP/M1/M2: <span id="p1_il_batch">—</span> • Position JP/M1/M2: <span id="p1_il_pos">—</span></span>
+          </div>
+          <div class="mt">
+            <div class="muted">Stats (3/4/5/6-ball matches, no bonus)</div>
+            <pre id="p1_il_stats" class="result-pre">—</pre>
+          </div>
         </div>
       </div>
 
@@ -239,7 +264,7 @@
       </details>
     </div>
 
-    <!-- Phase 2 — layout only -->
+    <!-- Phase 2 — placeholder -->
     <h2 class="mt-xl">Phase 2 — Prediction</h2>
     <div class="row cols-3">
       <div class="card">
