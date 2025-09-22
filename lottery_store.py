@@ -35,20 +35,48 @@ _STORE: Dict[str, Any] = {
 
 def _norm_date(s: str) -> str:
     """
-    Normalize many date shapes to MM/DD/YYYY.
-    Raises ValueError if not parseable.
+    Normalize many date shapes to zero-padded MM/DD/YYYY.
+
+    Accepts (examples):
+      9/6/2025, 09/06/2025, 9-6-2025
+      09/19/25, 9/19/25, 09-19-25   (2-digit year -> 2000+YY)
+      2025-09-06, 2025/9/6
+
+    Always returns: MM/DD/YYYY (e.g., 09/06/2025)
     """
     s = (s or "").strip()
-    # Allowed examples: 9/6/2025, 09/06/2025, 2025-09-06, 09-06-2025
-    fmts = ["%m/%d/%Y", "%-m/%-d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%-m-%-d-%Y"]
-    last_err = None
-    for fmt in fmts:
-        try:
-            dt = datetime.strptime(s, fmt)  # type: ignore[arg-type]
-            return dt.strftime("%m/%d/%Y")
-        except Exception as e:
-            last_err = e
-    raise ValueError(f"Unrecognized date: {s!r} ({last_err})")
+    if not s:
+        raise ValueError("empty date")
+
+    # Normalize separators to '/'
+    t = s.replace("-", "/")
+    parts = [p.strip() for p in t.split("/") if p.strip()]
+    if len(parts) != 3:
+        raise ValueError(f"Unrecognized date: {s!r}")
+
+    def to_int(x: str) -> int:
+        if not x.isdigit():
+            raise ValueError(f"Unrecognized date: {s!r}")
+        return int(x, 10)
+
+    # Heuristics:
+    # - If first part has 4 digits: YYYY/M/D
+    # - Else if last part has 4 digits: M/D/YYYY
+    # - Else last part has 2 digits: M/D/YY (assume 2000–2099)
+    if len(parts[0]) == 4:
+        y = to_int(parts[0]); m = to_int(parts[1]); d = to_int(parts[2])
+    else:
+        if len(parts[2]) == 4:
+            m = to_int(parts[0]); d = to_int(parts[1]); y = to_int(parts[2])
+        else:
+            m = to_int(parts[0]); d = to_int(parts[1]); yy = to_int(parts[2])
+            y = 2000 + yy
+
+    # Basic range checks (lightweight)
+    if not (1 <= m <= 12 and 1 <= d <= 31 and 1900 <= y <= 2100):
+        raise ValueError(f"Unrecognized date: {s!r}")
+
+    return f"{m:02d}/{d:02d}/{y:04d}"
 
 
 def _to_int(x: str | int | None) -> Optional[int]:
