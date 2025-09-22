@@ -124,4 +124,37 @@ $('#runPhase1')?.addEventListener('click', async ()=>{
   const mmLine=L_MM? `${fmtDateMMDDYY(mmDate)}  ${L_MM[0].map(x=>pad2(+x)).join('-')}  ${pad2(L_MM[1])}` : '—';
   const pbLine=L_PB? `${fmtDateMMDDYY(pbDate)}  ${L_PB[0].map(x=>pad2(+x)).join('-')}  ${pad2(L_PB[1])}` : '—';
   const ilLines=[];
-  if
+  if(L_IJP) ilLines.push('JP  '+`${fmtDateMMDDYY(ilDate)}  ${L_IJP[0].map(x=>pad2(+x)).join('-')}`);
+  if(L_IM1) ilLines.push('M1  '+`${fmtDateMMDDYY(ilDate)}  ${L_IM1[0].map(x=>pad2(+x)).join('-')}`);
+  if(L_IM2) ilLines.push('M2  '+`${fmtDateMMDDYY(ilDate)}  ${L_IM2[0].map(x=>pad2(+x)).join('-')}`);
+
+  setText('p1_mm_line',mmLine); setText('p1_pb_line',pbLine); setText('p1_il_lines',ilLines.join('\n')||'—');
+
+  function badge(id,ok){ const el=$('#'+id); if(!el) return; el.classList.remove('ok','no'); el.classList.add(ok?'ok':'no'); el.textContent=(id==='p1_il_exact'?'All three exact: ':'Exact: ')+(ok?'YES':'NO'); }
+  badge('p1_mm_exact', $('#hist_mm_blob').value.includes(mmLine));
+  badge('p1_pb_exact', $('#hist_pb_blob').value.includes(pbLine));
+  const ilOK =
+    (!L_IJP || $('#hist_il_jp_blob').value.includes(`${fmtDateMMDDYY(ilDate)}  ${L_IJP[0].map(x=>pad2(+x)).join('-')}`)) &&
+    (!L_IM1 || $('#hist_il_m1_blob').value.includes(`${fmtDateMMDDYY(ilDate)}  ${L_IM1[0].map(x=>pad2(+x)).join('-')}`)) &&
+    (!L_IM2 || $('#hist_il_m2_blob').value.includes(`${fmtDateMMDDYY(ilDate)}  ${L_IM2[0].map(x=>pad2(+x)).join('-')}`));
+  badge('p1_il_exact', ilOK);
+
+  function pos(blob,target){ const rows=splitLines(blob); const i=rows.indexOf(target); return {size:rows.length,pos:(i>=0?i+1:'—')}; }
+  const mmBP=pos($('#hist_mm_blob').value,mmLine), pbBP=pos($('#hist_pb_blob').value,pbLine);
+  const ilJPBP=pos($('#hist_il_jp_blob').value, ilLines[0]?.slice(4) ? ilLines[0] : `JP  ${fmtDateMMDDYY(ilDate)}  ${(L_IJP?.[0]||[]).map(x=>pad2(+x)).join('-')}`);
+  const ilM1BP=pos($('#hist_il_m1_blob').value, `M1  ${fmtDateMMDDYY(ilDate)}  ${(L_IM1?.[0]||[]).map(x=>pad2(+x)).join('-')}`);
+  const ilM2BP=pos($('#hist_il_m2_blob').value, `M2  ${fmtDateMMDDYY(ilDate)}  ${(L_IM2?.[0]||[]).map(x=>pad2(+x)).join('-')}`);
+  setText('p1_mm_batch',mmBP.size||'0'); setText('p1_mm_pos',mmBP.pos);
+  setText('p1_pb_batch',pbBP.size||'0'); setText('p1_pb_pos',pbBP.pos);
+  setText('p1_il_batch',[ilJPBP.size,ilM1BP.size,ilM2BP.size].join('/'));
+  setText('p1_il_pos',[ilJPBP.pos,ilM1BP.pos,ilM2BP.pos].join('/'));
+
+  setText('p1_mm_stats', L_MM ? computeStatsMM_PB(L_MM, $('#hist_mm_blob').value) : '—');
+  setText('p1_pb_stats', L_PB ? computeStatsMM_PB(L_PB, $('#hist_pb_blob').value) : '—');
+  setText('p1_il_stats', computeStatsIL_All(L_IJP,L_IM1,L_IM2,$('#hist_il_jp_blob').value,$('#hist_il_m1_blob').value,$('#hist_il_m2_blob').value));
+});
+
+// ---------- Phase 2 placeholder ----------
+$('#btn_run_p2')?.addEventListener('click', ()=>{
+  $('#p2_output').textContent = '→ Connect this button to your backend Phase-2 logic.';
+});
