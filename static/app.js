@@ -1,54 +1,120 @@
-<script>
-// ---------- tiny DOM helpers ----------
-const $ = (id) => document.getElementById(id);
-const on = (id, evt, fn) => $(id) && $(id).addEventListener(evt, fn);
+/* static/app.js — minimal Phase 1 wire-up */
 
-// ---------- Upload master CSV ----------
-on("upload_btn", "click", async () => {
-  const file = $("upload_csv").files?.[0];
-  if (!file) { $("upload_result").textContent = "No file chosen."; return; }
-  $("upload_result").textContent = "Uploading...";
+function q(id) { return document.getElementById(id); }
+function val(id) { const el = q(id); return el ? el.value.trim() : ""; }
 
-  const fd = new FormData();
-  fd.append("csv", file);
-  fd.append("overwrite", $("upload_over")?.checked ? "1" : "0");
-
+function tryJsonParse(str) {
+  // Accept JSON-looking text like [[10,14,34,40,43],5]
+  // If not valid JSON, return null so we can show a friendly error
   try {
-    const r = await fetch("/store/import_csv", {
-      method: "POST",
-      body: fd,
-      credentials: "same-origin",
-    });
-    const text = await r.text();            // read as text first
-    try {
-      const j = JSON.parse(text);           // try JSON if possible
-      $("upload_result").textContent = JSON.stringify(j, null, 2);
-    } catch {
-      $("upload_result").textContent = text; // show HTML/text error for visibility
-    }
-  } catch (e) {
-    $("upload_result").textContent = `Upload failed: ${e}`;
-  }
-});
-
-// ---------- (optional) examples for Phase-1 loaders ----------
-// If you have date inputs and "Load 20" buttons, keep using your existing
-// routes (/store/get_by_date and /store/get_history). The below shows the pattern.
-
-async function loadHistory(game, fromDateISO, textareaId) {
-  try {
-    const r = await fetch(`/store/get_history?game=${encodeURIComponent(game)}&from=${encodeURIComponent(fromDateISO)}&limit=20`);
-    const j = await r.json();
-    $(textareaId).value = j.blob || "";
-  } catch (e) {
-    $(textareaId).value = `Error: ${e}`;
+    return JSON.parse(str);
+  } catch {
+    return null;
   }
 }
 
-// Example wiring:
-// on("btn_mm_load20", "click", () => loadHistory("MM", $("mm_hist_date").value, "HIST_MM_BLOB"));
-// on("btn_pb_load20", "click", () => loadHistory("PB", $("pb_hist_date").value, "HIST_PB_BLOB"));
-// on("btn_iljp_load20", "click", () => loadHistory("IL_JP", $("il_jp_hist_date").value, "HIST_IL_JP_BLOB"));
-// on("btn_ilm1_load20", "click", () => loadHistory("IL_M1", $("il_m1_hist_date").value, "HIST_IL_M1_BLOB"));
-// on("btn_ilm2_load20", "click", () => loadHistory("IL_M2", $("il_m2_hist_date").value, "HIST_IL_M2_BLOB"));
-</script>
+function toast(msg, type = "info") {
+  const box = q("phase1_msg");
+  if (box) {
+    box.textContent = msg;
+    box.className = `msg ${type}`;
+  } else {
+    alert(msg);
+  }
+}
+
+async function runPhase1() {
+  // Gather previews: they must be JSON-looking, e.g. [[10,14,34,40,43],5] or [[1,4,5,10,18,49],null]
+  const mm = tryJsonParse(val("mm_preview"));
+  const pb = tryJsonParse(val("pb_preview"));
+  const il_jp = tryJsonParse(val("il_jp_preview"));
+  const il_m1 = tryJsonParse(val("il_m1_preview"));
+  const il_m2 = tryJsonParse(val("il_m2_preview"));
+
+  const missing = [];
+  if (!mm) missing.push("Mega Millions");
+  if (!pb) missing.push("Powerball");
+  if (!il_jp) missing.push("IL Jackpot");
+  if (!il_m1) missing.push("IL Million 1");
+  if (!il_m2) missing.push("IL Million 2");
+  if (missing.length) {
+    toast(`These boxes are empty or not valid JSON: ${missing.join(", ")}.`, "error");
+    return;
+  }
+
+  // Feeds (plain text is fine)
+  const feed_mm = val("feed_mm");
+  const feed_pb = val("feed_pb");
+  const feed_il = val("feed_il");
+
+  // History blobs (plain text; server understands mm/dd/yyyy lines + rows)
+  const hist_mm = val("hist_mm_blob");
+  const hist_pb = val("hist_pb_blob");
+  const hist_il_jp = val("hist_il_jp_blob");
+  const hist_il_m1 = val("hist_il_m1_blob");
+  const hist_il_m2 = val("hist_il_m2_blob");
+
+  const payload = {
+    // newest jackpot (NJ for Phase 1 training)
+    LATEST_MM: mm,            // [[mains], bonus]
+    LATEST_PB: pb,            // [[mains], bonus]
+    LATEST_IL_JP: il_jp,      // [[mains], null]
+    LATEST_IL_M1: il_m1,      // [[mains], null]
+    LATEST_IL_M2: il_m2,      // [[mains], null]
+
+    // feeds
+    FEED_MM: feed_mm,
+    FEED_PB: feed_pb,
+    FEED_IL: feed_il,
+
+    // history blobs (top row newest)
+    HIST_MM_BLOB: hist_mm,
+    HIST_PB_BLOB: hist_pb,
+    HIST_IL_JP_BLOB: hist_il_jp,
+    HIST_IL_M1_BLOB: hist_il_m1,
+    HIST_IL_M2_BLOB: hist_il_m2
+  };
+
+  toast("Running Phase 1…");
+
+  let res;
+  try {
+    res = await fetch("/run_json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch (e) {
+    toast(`Network error: ${e}`, "error");
+    return;
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    toast("Server returned non-JSON. Open DevTools → Network → /run_json to see details.", "error");
+    return;
+  }
+
+  if (!res.ok || data.ok === false) {
+    const detail = data && (data.detail || data.error) || "Unknown error";
+    toast(`Phase 1 failed: ${detail}`, "error");
+    return;
+  }
+
+  // Success — show saved path so Phase 2 can auto-fill.
+  if (data.saved_path && q("phase1_saved_path")) {
+    q("phase1_saved_path").value = data.saved_path;
+  }
+  toast("Phase 1 finished. Saved path updated.", "success");
+
+  // (Optional) If you have specific fields to render, do it here using 'data'
+  // e.g., bands, hit tables, etc. This keeps the first fix focused on wiring.
+}
+
+// Hook up the button
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = q("btn_run_phase1");
+  if (btn) btn.addEventListener("click", runPhase1);
+});
