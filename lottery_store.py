@@ -1,279 +1,270 @@
-# lottery_store.py
-# ----------------------------------------------------------------------
-# In-memory store for lottery history with robust date normalization.
-# Works with app.py endpoints: /store/import_csv, /store/get_by_date,
-# /store/get_history, and any UI calling these routes.
-#
-# CSV schema (combined master):
-#   game,draw_date,tier,n1,n2,n3,n4,n5,n6,bonus
-# - game: MM | PB | IL
-# - draw_date: M/D/YYYY or MM/DD/YYYY (both accepted)
-# - tier: (blank) for MM/PB, JP|M1|M2 for IL
-# - bonus: number for MM/PB, blank/null for IL
-# ----------------------------------------------------------------------
-
 from __future__ import annotations
 
 import csv
 import io
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Any, List, Tuple, Optional
+from typing import List, Dict, Optional, Any, Tuple
 
-# Internal store:
-# MM_DATA[date] = {"mains":[n1..n5], "bonus": int}
-# PB_DATA[date] = {"mains":[n1..n5], "bonus": int}
-# IL_DATA[tier][date] = {"mains":[n1..n6], "bonus": None}
-MM_DATA: Dict[str, Dict[str, Any]] = {}
-PB_DATA: Dict[str, Dict[str, Any]] = {}
-IL_DATA: Dict[str, Dict[str, Dict[str, Any]]] = {"JP": {}, "M1": {}, "M2": {}}
 
-# ---------------------------- helpers ----------------------------
+# -----------------------------
+# In-memory store
+# -----------------------------
 
-def _parse_int(x: Any) -> Optional[int]:
-    try:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if s == "" or s.lower() == "null":
-            return None
-        return int(s)
-    except Exception:
-        return None
+@dataclass
+class Row:
+    game: str                 # "MM" | "PB" | "IL"
+    date_mmddyyyy: str        # always normalized “MM/DD/YYYY”
+    tier: Optional[str]       # None for MM/PB, "JP" | "M1" | "M2" for IL
+    mains: List[int]          # 5 for MM/PB, 6 for IL
+    bonus: Optional[int]      # Mega/Power ball (MM/PB) or None for IL
+
+_STORE: Dict[str, Any] = {
+    "rows": [],           # List[Row]
+    "by_game": {          # Dict[str, Dict[str, list[Row]]]   keyed by date (and tier for IL)
+        "MM": {},
+        "PB": {},
+        "IL": {}          # IL: by date → {"JP": Row, "M1": Row, "M2": Row}
+    }
+}
+
+
+# -----------------------------
+# Utilities
+# -----------------------------
 
 def _norm_date(s: str) -> str:
     """
-    Normalize any 'M/D/YYYY' or 'MM/DD/YYYY' string to unpadded 'M/D/YYYY'.
-    This guarantees that 09/16/2025 == 9/16/2025 in lookups.
+    Normalize many date shapes to MM/DD/YYYY.
+    Raises ValueError if not parseable.
     """
     s = (s or "").strip()
-    # Be tolerant of 0-padded and non-padded forms
-    # Split manually to avoid %-m on Windows
-    items = s.replace("-", "/").split("/")
-    if len(items) != 3:
-        # Try standard parsing as a fallback
-        dt = datetime.strptime(s, "%m/%d/%Y")
-        return f"{dt.month}/{dt.day}/{dt.year}"
-    m = int(items[0])
-    d = int(items[1])
-    y = int(items[2])
-    return f"{m}/{d}/{y}"
+    # Allowed examples: 9/6/2025, 09/06/2025, 2025-09-06, 09-06-2025
+    fmts = ["%m/%d/%Y", "%-m/%-d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%-m-%-d-%Y"]
+    last_err = None
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(s, fmt)  # type: ignore[arg-type]
+            return dt.strftime("%m/%d/%Y")
+        except Exception as e:
+            last_err = e
+    raise ValueError(f"Unrecognized date: {s!r} ({last_err})")
 
-def _fmt_mm_blob(date_str: str, row: Dict[str, Any]) -> str:
-    # "mm-dd-yy — n1-n2-n3-n4-n5 MB"
-    dt = datetime.strptime(_norm_date(date_str), "%m/%d/%Y")
-    mm = dt.strftime("%m-%d-%y")
-    mains = row["mains"]
-    bonus = row.get("bonus")
-    return f"{mm} — {mains[0]:02d}-{mains[1]:02d}-{mains[2]:02d}-{mains[3]:02d}-{mains[4]:02d} {bonus:02d}"
 
-def _fmt_pb_blob(date_str: str, row: Dict[str, Any]) -> str:
-    # "mm-dd-yy — n1-n2-n3-n4-n5 PB"
-    dt = datetime.strptime(_norm_date(date_str), "%m/%d/%Y")
-    mm = dt.strftime("%m-%d-%y")
-    mains = row["mains"]
-    bonus = row.get("bonus")
-    return f"{mm} — {mains[0]:02d}-{mains[1]:02d}-{mains[2]:02d}-{mains[3]:02d}-{mains[4]:02d} {bonus:02d}"
+def _to_int(x: str | int | None) -> Optional[int]:
+    if x is None:
+        return None
+    if isinstance(x, int):
+        return x
+    s = str(x).strip()
+    if s == "" or s.lower() == "null":
+        return None
+    return int(s)
 
-def _fmt_il_blob(date_str: str, row: Dict[str, Any]) -> str:
-    # "mm-dd-yy — A-B-C-D-E-F"
-    dt = datetime.strptime(_norm_date(date_str), "%m/%d/%Y")
-    mm = dt.strftime("%m-%d-%y")
-    mains = row["mains"]  # 6 numbers
-    return f"{mm} — {mains[0]:02d}-{mains[1]:02d}-{mains[2]:02d}-{mains[3]:02d}-{mains[4]:02d}-{mains[5]:02d}"
 
-def _sort_dates_desc(dates: List[str]) -> List[str]:
-    return sorted(dates, key=lambda s: datetime.strptime(_norm_date(s), "%m/%d/%Y"), reverse=True)
+def _clean_game(s: str) -> str:
+    s = (s or "").strip().upper()
+    # Accept “MEGAMILLIONS”, “MEGA MILLIONS”, etc.
+    if s in ("MM", "MEGA", "MEGA MILLIONS", "MEGAMILLIONS"):
+        return "MM"
+    if s in ("PB", "POWERBALL"):
+        return "PB"
+    if s in ("IL", "ILLINOIS", "IL LOTTO", "ILLOTTO"):
+        return "IL"
+    return s
 
-# --------------------------- core API ----------------------------
 
-def import_csv(text: str, overwrite: bool = False) -> Dict[str, Any]:
+def _clean_tier(s: str | None) -> Optional[str]:
+    if not s:
+        return None
+    val = s.strip().upper()
+    if val in ("JP", "JACKPOT"):
+        return "JP"
+    if val in ("M1", "MILLION1", "MILLION 1", "MILLION_1"):
+        return "M1"
+    if val in ("M2", "MILLION2", "MILLION 2", "MILLION_2"):
+        return "M2"
+    return val
+
+
+def _pack_row(r: Row) -> Dict[str, Any]:
+    return {
+        "game": r.game,
+        "date": r.date_mmddyyyy,
+        "tier": r.tier,
+        "mains": r.mains,
+        "bonus": r.bonus,
+    }
+
+
+# -----------------------------
+# CSV import
+# -----------------------------
+
+def import_csv(text: str, overwrite: bool = False) -> Dict[str, int | bool]:
     """
-    Import the entire master CSV content into memory.
-      - overwrite=True replaces all existing data
-      - overwrite=False appends/updates existing keys
-    Returns stats: {"ok": True, "added": X, "updated": Y, "total": N}
+    Import the combined master CSV from a raw string.
+    Expected header (case-insensitive):
+      game, draw_date, tier, n1, n2, n3, n4, n5, n6, bonus
+    - MM/PB use n1..n5 + bonus (n6 ignored)
+    - IL uses n1..n6, bonus ignored; tier must be JP/M1/M2
     """
+    global _STORE
+
     if overwrite:
-        MM_DATA.clear()
-        PB_DATA.clear()
-        for t in IL_DATA:
-            IL_DATA[t].clear()
+        _STORE = {"rows": [], "by_game": {"MM": {}, "PB": {}, "IL": {}}}
 
+    reader = csv.DictReader(io.StringIO(text))
     added = 0
-    updated = 0
 
-    f = io.StringIO(text)
-    reader = csv.DictReader(f)
-    # Normalize header names (robust in case of casing)
-    fieldmap = { (k or "").strip().lower(): k for k in reader.fieldnames or [] }
+    for raw in reader:
+        game = _clean_game(raw.get("game", ""))
+        date = _norm_date(raw.get("draw_date", "") or raw.get("date", ""))
+        tier = _clean_tier(raw.get("tier"))
 
-    def g(name: str) -> str:
-        return fieldmap.get(name.lower(), name)
+        n1 = _to_int(raw.get("n1"))
+        n2 = _to_int(raw.get("n2"))
+        n3 = _to_int(raw.get("n3"))
+        n4 = _to_int(raw.get("n4"))
+        n5 = _to_int(raw.get("n5"))
+        n6 = _to_int(raw.get("n6"))
+        bonus = _to_int(raw.get("bonus"))
 
-    for row in reader:
-        game = (row.get(g("game")) or "").strip().upper()
-        raw_date = row.get(g("draw_date")) or ""
-        tier = (row.get(g("tier")) or "").strip().upper()
-        n1 = _parse_int(row.get(g("n1")))
-        n2 = _parse_int(row.get(g("n2")))
-        n3 = _parse_int(row.get(g("n3")))
-        n4 = _parse_int(row.get(g("n4")))
-        n5 = _parse_int(row.get(g("n5")))
-        n6 = _parse_int(row.get(g("n6")))
-        bonus = _parse_int(row.get(g("bonus")))
-
-        if not game or not raw_date:
+        if game not in ("MM", "PB", "IL"):
             continue
 
-        date = _norm_date(raw_date)
-
-        if game == "MM":
-            # Need 5 mains + bonus
-            if None in (n1, n2, n3, n4, n5) or bonus is None:
+        if game in ("MM", "PB"):
+            mains = [n1, n2, n3, n4, n5]
+            if any(v is None for v in mains) or bonus is None:
                 continue
-            payload = {"mains": [n1, n2, n3, n4, n5], "bonus": bonus}
-            if date in MM_DATA:
-                MM_DATA[date] = payload
-                updated += 1
-            else:
-                MM_DATA[date] = payload
-                added += 1
+            mains = [int(v) for v in mains]  # type: ignore[arg-type]
+            row = Row(game=game, date_mmddyyyy=date, tier=None, mains=mains, bonus=int(bonus))
+            _insert_row(row)
+            added += 1
 
-        elif game == "PB":
-            if None in (n1, n2, n3, n4, n5) or bonus is None:
-                continue
-            payload = {"mains": [n1, n2, n3, n4, n5], "bonus": bonus}
-            if date in PB_DATA:
-                PB_DATA[date] = payload
-                updated += 1
-            else:
-                PB_DATA[date] = payload
-                added += 1
-
-        elif game == "IL":
-            # IL Lotto: tier must be JP, M1, or M2; 6 mains, no bonus
+        else:  # IL
+            # tier needed (JP/M1/M2). Keep flexible if a file omitted tier for JP newest/second/third.
             if tier not in ("JP", "M1", "M2"):
-                # skip unknown tiers
+                # allow blank tier if the sheet actually put JP rows without tier:
+                tier = "JP"
+            mains_il = [n1, n2, n3, n4, n5, n6]
+            if any(v is None for v in mains_il):
                 continue
-            if None in (n1, n2, n3, n4, n5, n6):
-                continue
-            payload = {"mains": [n1, n2, n3, n4, n5, n6], "bonus": None}
-            if date in IL_DATA[tier]:
-                IL_DATA[tier][date] = payload
-                updated += 1
-            else:
-                IL_DATA[tier][date] = payload
-                added += 1
+            mains_il = [int(v) for v in mains_il]  # type: ignore[arg-type]
+            row = Row(game="IL", date_mmddyyyy=date, tier=tier, mains=mains_il, bonus=None)
+            _insert_row(row)
+            added += 1
 
-        else:
-            # Unknown game
-            continue
+    return {"ok": True, "added": added, "updated": 0, "total": len(_STORE["rows"])}
 
-    total = len(MM_DATA) + len(PB_DATA) + sum(len(IL_DATA[t]) for t in IL_DATA)
-    return {"ok": True, "added": added, "updated": updated, "total": total}
+
+def import_csv_io(file_like, overwrite: bool = False) -> Dict[str, int | bool]:
+    """
+    Back-compat wrapper so code that calls `import_csv_io(...)` continues to work.
+    Accepts a file-like object or raw bytes/text.
+    """
+    if hasattr(file_like, "read"):
+        raw = file_like.read()
+    else:
+        raw = file_like
+    if isinstance(raw, bytes):
+        text = raw.decode("utf-8", errors="replace")
+    else:
+        text = str(raw)
+    return import_csv(text, overwrite=overwrite)
+
+
+def _insert_row(r: Row) -> None:
+    _STORE["rows"].append(r)
+    if r.game in ("MM", "PB"):
+        _STORE["by_game"][r.game].setdefault(r.date_mmddyyyy, []).append(r)
+    else:
+        _STORE["by_game"]["IL"].setdefault(r.date_mmddyyyy, {})
+        _STORE["by_game"]["IL"][r.date_mmddyyyy][r.tier] = r  # type: ignore[index]
+
+
+# -----------------------------
+# Query helpers used by UI
+# -----------------------------
 
 def get_by_date(game: str, date: str, tier: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Return a single row dict for a given game/date (and tier for IL).
-    None if not found.
+    Fetch one row by date (and tier for IL).
+    - game: "MM"|"PB"|"IL"
+    - date: MM/DD/YYYY
+    - tier: required for IL ("JP"|"M1"|"M2")
     """
-    g = (game or "").strip().upper()
-    d = _norm_date(date)
+    game = _clean_game(game)
+    date = _norm_date(date)
+    t = _clean_tier(tier)
 
-    if g == "MM":
-        return MM_DATA.get(d)
-    if g == "PB":
-        return PB_DATA.get(d)
-    if g == "IL":
-        t = (tier or "").strip().upper()
-        if t in IL_DATA:
-            return IL_DATA[t].get(d)
+    if game in ("MM", "PB"):
+        rows = _STORE["by_game"][game].get(date, [])
+        # If multiple rows exist for same date (shouldn't), return the first
+        if rows:
+            return _pack_row(rows[0])
         return None
-    return None
 
-def list_dates(game: str, limit: int = 40, tier: Optional[str] = None) -> List[str]:
-    """ List newest->older dates for a game (and IL tier). """
-    g = (game or "").strip().upper()
+    # IL
+    if t not in ("JP", "M1", "M2"):
+        # try JP by default to be forgiving
+        t = "JP"
+    by_tier = _STORE["by_game"]["IL"].get(date, {})
+    r = by_tier.get(t)
+    return _pack_row(r) if r else None
 
-    if g == "MM":
-        dates = _sort_dates_desc(list(MM_DATA.keys()))
-    elif g == "PB":
-        dates = _sort_dates_desc(list(PB_DATA.keys()))
-    elif g == "IL":
-        t = (tier or "").strip().upper()
-        if t not in IL_DATA:
-            return []
-        dates = _sort_dates_desc(list(IL_DATA[t].keys()))
-    else:
-        return []
-
-    return dates[:max(0, int(limit))]
 
 def get_history(game: str, start_date: str, limit: int = 20, tier: Optional[str] = None) -> Dict[str, Any]:
     """
-    From the given start_date (included), return up to 'limit' rows in
-    newest->older order, and a 'blob' text formatted for the UI.
+    Return last `limit` rows from `start_date` (inclusive → older), plus the “blob” text
+    your UI displays.
+
+    For MM/PB:  mm-dd-yy  n1-n2-n3-n4-n5  BB
+    For IL:     mm-dd-yy  A-B-C-D-E-F
     """
-    g = (game or "").strip().upper()
-    d0 = _norm_date(start_date)
-    lim = max(1, int(limit))
+    game = _clean_game(game)
+    start = _norm_date(start_date)
+    t = _clean_tier(tier)
 
-    if g == "MM":
-        dates = _sort_dates_desc(list(MM_DATA.keys()))
-        # start at the exact date
-        try:
-            idx = dates.index(d0)
-        except ValueError:
-            # if date not present, find the first date <= requested date
-            dt0 = datetime.strptime(d0, "%m/%d/%Y")
-            idx = next((i for i, ds in enumerate(dates)
-                        if datetime.strptime(ds, "%m/%d/%Y") <= dt0), 0)
+    def dt_key(s: str) -> datetime:
+        return datetime.strptime(s, "%m/%d/%Y")
 
-        picked = dates[idx: idx + lim]
-        rows = [{"date": ds, **MM_DATA[ds]} for ds in picked]
-        blob_lines = [_fmt_mm_blob(ds, MM_DATA[ds]) for ds in picked]
-        return {"rows": rows, "blob": "\n".join(blob_lines)}
+    rows_out: List[Row] = []
 
-    if g == "PB":
-        dates = _sort_dates_desc(list(PB_DATA.keys()))
-        try:
-            idx = dates.index(d0)
-        except ValueError:
-            dt0 = datetime.strptime(d0, "%m/%d/%Y")
-            idx = next((i for i, ds in enumerate(dates)
-                        if datetime.strptime(ds, "%m/%d/%Y") <= dt0), 0)
+    if game in ("MM", "PB"):
+        by_date = _STORE["by_game"][game]
+        # dates <= start, newest to oldest
+        dates = sorted((d for d in by_date.keys() if dt_key(d) <= dt_key(start)), key=dt_key, reverse=True)
+        for d in dates:
+            rows_out.extend(by_date[d])
+            if len(rows_out) >= limit:
+                break
+        rows_out = rows_out[:limit]
 
-        picked = dates[idx: idx + lim]
-        rows = [{"date": ds, **PB_DATA[ds]} for ds in picked]
-        blob_lines = [_fmt_pb_blob(ds, PB_DATA[ds]) for ds in picked]
-        return {"rows": rows, "blob": "\n".join(blob_lines)}
+        blob_lines: List[str] = []
+        for r in rows_out:
+            mdyy = datetime.strptime(r.date_mmddyyyy, "%m/%d/%Y").strftime("%m-%d-%y")
+            blob_lines.append(f"{mdyy}  {r.mains[0]:02d}-{r.mains[1]:02d}-{r.mains[2]:02d}-{r.mains[3]:02d}-{r.mains[4]:02d}  {r.bonus:02d}")
+        blob = "\n".join(blob_lines)
+        return {"rows": [_pack_row(r) for r in rows_out], "blob": blob}
 
-    if g == "IL":
-        t = (tier or "").strip().upper()
-        if t not in IL_DATA:
-            return {"rows": [], "blob": ""}
+    # IL
+    if t not in ("JP", "M1", "M2"):
+        t = "JP"
+    by_date_tiers = _STORE["by_game"]["IL"]
+    dates = sorted((d for d in by_date_tiers.keys() if dt_key(d) <= dt_key(start)), key=dt_key, reverse=True)
 
-        dates = _sort_dates_desc(list(IL_DATA[t].keys()))
-        try:
-            idx = dates.index(d0)
-        except ValueError:
-            dt0 = datetime.strptime(d0, "%m/%d/%Y")
-            idx = next((i for i, ds in enumerate(dates)
-                        if datetime.strptime(ds, "%m/%d/%Y") <= dt0), 0)
+    for d in dates:
+        r = by_date_tiers[d].get(t)
+        if r:
+            rows_out.append(r)
+            if len(rows_out) >= limit:
+                break
 
-        picked = dates[idx: idx + lim]
-        rows = [{"date": ds, **IL_DATA[t][ds]} for ds in picked]
-        blob_lines = [_fmt_il_blob(ds, IL_DATA[t][ds]) for ds in picked]
-        return {"rows": rows, "blob": "\n".join(blob_lines)}
-
-    return {"rows": [], "blob": ""}
-
-# Optional: a simple “ping” for debugging (importers/tests can call)
-def _debug_counts() -> Dict[str, int]:
-    return {
-        "MM": len(MM_DATA),
-        "PB": len(PB_DATA),
-        "IL_JP": len(IL_DATA["JP"]),
-        "IL_M1": len(IL_DATA["M1"]),
-        "IL_M2": len(IL_DATA["M2"]),
-    }
+    blob_lines: List[str] = []
+    for r in rows_out:
+        mdyy = datetime.strptime(r.date_mmddyyyy, "%m/%d/%Y").strftime("%m-%d-%y")
+        a, b, c, d, e, f = r.mains
+        blob_lines.append(f"{mdyy}  {a:02d}-{b:02d}-{c:02d}-{d:02d}-{e:02d}-{f:02d}")
+    blob = "\n".join(blob_lines)
+    return {"rows": [_pack_row(r) for r in rows_out], "blob": blob}
