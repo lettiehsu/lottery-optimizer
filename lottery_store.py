@@ -1,200 +1,221 @@
 from __future__ import annotations
-import csv, io, json, os
-from datetime import datetime
-from typing import Dict, Any, Tuple, List, Optional
 
-# Persist here (works on Render)
+import csv
+import io
+import json
+import os
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Tuple
+
+# Where we persist the normalized rows (works on Render)
 STORE_PATH = "/tmp/lotto_store.json"
 
-# in-memory db: key = (game, date, tier)
+# In-memory DB: key = (game, date, tier_or_empty)
 _DB: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 
 
-# ---------- date helpers ----------
+# ---------------- Date helpers ----------------
 
 def _norm_date(s: str) -> str:
     """
-    Normalize many date shapes to MM/DD/YYYY.
-    Accepts: 9/6/2025, 09/06/2025, 2025-09-06, 09-06-2025, 09/06/25
+    Accepts many shapes and returns MM/DD/YYYY.
     """
     s = (s or "").strip()
-    fmts = ["%m/%d/%Y", "%-m/%-d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%m/%d/%y"]
-    last = None
+    # Accept: 9/6/2025, 09/06/2025, 2025-09-06, 09-06-2025, 09/06/25
+    fmts = ["%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%m-%d-%Y", "%m-%d-%y"]
+    last_err = None
     for fmt in fmts:
         try:
             dt = datetime.strptime(s, fmt)
             return dt.strftime("%m/%d/%Y")
         except Exception as e:
-            last = e
-    raise ValueError(f"Unrecognized date: {s!r} ({last})")
+            last_err = e
+    raise ValueError(f"Unrecognized date: {s!r} ({last_err})")
 
 
-def _to_display_date(iso_mmddyyyy: str) -> str:
-    # UI wants mm-dd-yy on history lines
-    dt = datetime.strptime(iso_mmddyyyy, "%m/%d/%Y")
-    return dt.strftime("%m-%d-%y")
-
-
-# ---------- disk I/O ----------
-
-def _load():
+def _load_from_disk() -> None:
     global _DB
     if os.path.exists(STORE_PATH):
         try:
-            with open(STORE_PATH, "r", encoding="utf-8") as fp:
-                raw = json.load(fp)
-            _DB = {tuple(k.split("|", 2)): v for k, v in raw.items()}
+            with open(STORE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            _DB = {tuple(k.split("|", 2)): v for k, v in data.items()}
         except Exception:
             _DB = {}
     else:
         _DB = {}
 
 
-def _save():
-    raw = {"|".join(k): v for k, v in _DB.items()}
-    with open(STORE_PATH, "w", encoding="utf-8") as fp:
-        json.dump(raw, fp, ensure_ascii=False)
+def _save_to_disk() -> None:
+    os.makedirs(os.path.dirname(STORE_PATH), exist_ok=True)
+    serial = {"|".join(k): v for k, v in _DB.items()}
+    with open(STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump(serial, f, ensure_ascii=False)
 
 
-# ---------- public API ----------
+def _key(game: str, date_mmddyyyy: str, tier: str) -> Tuple[str, str, str]:
+    return (game.upper(), date_mmddyyyy, tier.upper() if tier else "")
 
-def import_csv(text: str, overwrite: bool = True) -> Dict[str, int | bool]:
+
+# ---------------- Public API used by app.py ----------------
+
+def import_csv(text: str, overwrite: bool = False) -> Dict[str, Any]:
     """
-    CSV headers: game,draw_date,tier,n1,n2,n3,n4,n5,n6,bonus
-    - game: MM, PB, or IL
-    - tier: blank for MM/PB, or JP/M1/M2 for IL
+    Accepts the entire CSV text as a string.
+    Columns (header names are case-insensitive):
+      game, draw_date, tier, n1, n2, n3, n4, n5, n6, bonus
+    - game: MM | PB | IL
+    - tier: blank for MM/PB; for IL use JP/M1/M2 (or blank for classic 6)
+    - draw_date: any parseable date (see _norm_date)
+    - n1..n6: integers (MM/PB use 5 mains; IL uses 6)
+    - bonus: integer for MM/PB, blank for IL
     """
-    _load()
-    added = updated = 0
+    _load_from_disk()
 
-    rdr = csv.DictReader(io.StringIO(text))
-    expected = {"game","draw_date","tier","n1","n2","n3","n4","n5","n6","bonus"}
-    if set(h.lower() for h in rdr.fieldnames or []) != expected:
-        # Try forgiving header names (case-insensitive, order-agnostic)
-        fn = [h.lower() for h in (rdr.fieldnames or [])]
-        missing = expected - set(fn)
-        if missing:
-            raise ValueError(f"CSV headers mismatch. Expected {sorted(expected)}, got {rdr.fieldnames}")
+    if overwrite:
+        _DB.clear()
 
-    for row in rdr:
-        game = (row.get("game") or "").strip()
-        raw_date = (row.get("draw_date") or "").strip()
-        tier = (row.get("tier") or "").strip()
-        date = _norm_date(raw_date)
+    f = io.StringIO(text)
+    reader = csv.DictReader(f)
+    added = 0
+    updated = 0
 
-        n1 = int(row["n1"]) if row.get("n1") else None
-        n2 = int(row["n2"]) if row.get("n2") else None
-        n3 = int(row["n3"]) if row.get("n3") else None
-        n4 = int(row["n4"]) if row.get("n4") else None
-        n5 = int(row["n5"]) if row.get("n5") else None
-        n6 = int(row["n6"]) if row.get("n6") else None
-        bonus = row.get("bonus")
-        bonus = int(bonus) if (bonus and bonus.strip() != "") else None
-
-        mains: List[int] = []
-        for n in (n1, n2, n3, n4, n5, n6):
-            if n is not None:
-                mains.append(int(n))
-
-        key_game: str
-        key_tier = tier or ""
-
-        if game == "MM":
-            key_game = "MM"
-            key_tier = ""
-        elif game == "PB":
-            key_game = "PB"
-            key_tier = ""
-        elif game == "IL":
-            if tier not in ("JP", "M1", "M2"):
-                # skip unknown IL tier row
-                continue
-            key_game = f"IL_{tier}"
-            # IL has 6 mains and bonus = None
-            bonus = None
-        else:
-            # unknown game row
+    for row in reader:
+        game = (row.get("game") or row.get("Game") or "").strip().upper()
+        if game not in ("MM", "PB", "IL"):
+            # ignore empty or malformed lines
             continue
 
-        key = (key_game, date, key_tier)
-        item = {"game": key_game, "date": date, "tier": key_tier, "mains": mains, "bonus": bonus}
+        raw_date = row.get("draw_date") or row.get("date") or row.get("DrawDate") or ""
+        date = _norm_date(str(raw_date))
 
-        if key in _DB:
-            if overwrite:
-                _DB[key] = item
-                updated += 1
+        tier = (row.get("tier") or row.get("Tier") or "").strip().upper()
+        # Standardize IL tier names
+        if game == "IL":
+            if tier in ("JACKPOT", "JP", "IL_JP", "J"):
+                tier = "JP"
+            elif tier in ("M1", "IL_M1"):
+                tier = "M1"
+            elif tier in ("M2", "IL_M2"):
+                tier = "M2"
+            else:
+                # if truly blank, treat as "JP" (classic jackpot) for compatibility
+                if not tier:
+                    tier = "JP"
         else:
-            _DB[key] = item
+            # MM/PB have no tier
+            tier = ""
+
+        # read mains (support 5 or 6)
+        def iv(v): 
+            v = (v or "").strip()
+            return int(v) if v != "" else None
+
+        n1 = iv(row.get("n1")); n2 = iv(row.get("n2")); n3 = iv(row.get("n3"))
+        n4 = iv(row.get("n4")); n5 = iv(row.get("n5")); n6 = iv(row.get("n6"))
+        mains = [x for x in (n1, n2, n3, n4, n5, n6) if x is not None]
+
+        bonus_raw = row.get("bonus")
+        bonus = iv(bonus_raw) if bonus_raw is not None and bonus_raw != "" else None
+        if game in ("MM", "PB"):
+            # must be 5 mains and a bonus
+            mains = mains[:5]
+        else:  # IL
+            # must be 6 mains; bonus must be None
+            bonus = None
+            if len(mains) < 6:
+                # skip malformed
+                continue
+            mains = mains[:6]
+
+        rec = {
+            "game": game,
+            "date": date,
+            "tier": tier,
+            "mains": mains,
+            "bonus": bonus
+        }
+
+        k = _key(game, date, tier)
+        if k in _DB:
+            _DB[k] = rec
+            updated += 1
+        else:
+            _DB[k] = rec
             added += 1
 
-    _save()
+    _save_to_disk()
     return {"ok": True, "added": added, "updated": updated, "total": len(_DB)}
 
 
 def get_by_date(game: str, date: str) -> Optional[Dict[str, Any]]:
     """
-    game: "MM"|"PB"|"IL_JP"|"IL_M1"|"IL_M2"
-    date: MM/DD/YYYY
+    Returns one record for a game at a date.
+    - MM/PB → tier is ""
+    - IL    → You must specify a specific tier (JP/M1/M2) in the `game` name:
+              use "IL_JP", "IL_M1", or "IL_M2"
     """
-    _load()
+    _load_from_disk()
+    game = (game or "").upper().strip()
     date = _norm_date(date)
-    tier = ""  # stored key's 3rd part for IL rows is already "JP"/"M1"/"M2"
-    if game.startswith("IL_"):
+
+    if game in ("MM", "PB"):
+        tier = ""
+        return _DB.get(_key(game, date, tier))
+
+    # IL variants
+    if game in ("IL_JP", "IL_M1", "IL_M2"):
         tier = game.split("_", 1)[1]
-        game = f"IL_{tier}"
-        tier = tier
-    key = (game, date, tier if game.startswith("IL_") else "")
-    return _DB.get(key)
+        return _DB.get(_key("IL", date, tier))
+
+    # bare "IL" is ambiguous → None
+    return None
 
 
 def get_history(game: str, start_date: str, limit: int = 20) -> Dict[str, Any]:
     """
-    Returns last 'limit' rows including start_date and older (newest first in text blob).
-    blob formats:
-      - MM:  mm-dd-yy  a-b-c-d-e  BB
-      - PB:  mm-dd-yy  a-b-c-d-e  PP
-      - IL_*: mm-dd-yy  A-B-C-D-E-F
+    Returns up to `limit` rows from `start_date` (inclusive), going older.
+    - game ∈ {"MM","PB","IL_JP","IL_M1","IL_M2"}
     """
-    _load()
-    sd = datetime.strptime(_norm_date(start_date), "%m/%d/%Y")
+    _load_from_disk()
+    game = (game or "").upper().strip()
+    start_mmddyyyy = _norm_date(start_date)
 
-    # collect rows for this game
-    rows = []
-    for (g, d, t), v in _DB.items():
-        if game == "MM" and g == "MM":
-            rows.append(v)
-        elif game == "PB" and g == "PB":
-            rows.append(v)
-        elif game == "IL_JP" and g == "IL_JP":
-            rows.append(v)
-        elif game == "IL_M1" and g == "IL_M1":
-            rows.append(v)
-        elif game == "IL_M2" and g == "IL_M2":
-            rows.append(v)
+    if game in ("MM", "PB"):
+        tier = ""
+        prefix = (game, )
+        rows = [v for (g, d, t), v in _DB.items() if g == game and t == ""]
+    elif game in ("IL_JP", "IL_M1", "IL_M2"):
+        tier = game.split("_", 1)[1]
+        rows = [v for (g, d, t), v in _DB.items() if g == "IL" and t == tier]
+    else:
+        return {"ok": False, "rows": [], "blob": ""}
 
-    # sort by date desc
-    rows.sort(key=lambda r: datetime.strptime(r["date"], "%m/%d/%Y"), reverse=True)
+    # sort newest → oldest by date
+    def dkey(r): 
+        return datetime.strptime(r["date"], "%m/%d/%Y")
 
-    # start from the first row whose date <= start_date
-    filtered: List[Dict[str, Any]] = []
-    for r in rows:
-        if datetime.strptime(r["date"], "%m/%d/%Y") <= sd:
-            filtered.append(r)
-        if len(filtered) >= limit:
-            break
+    rows.sort(key=dkey, reverse=True)
 
-    # build blob text
-    lines: List[str] = []
-    for r in filtered:
-        disp = _to_display_date(r["date"])
-        mains = r["mains"]
-        if game in ("MM", "PB"):
-            a, b, c, d, e = mains[:5]
-            bonus = r.get("bonus", 0)
-            suffix = f"{bonus:02d}"
-            lines.append(f"{disp}  {a:02d}-{b:02d}-{c:02d}-{d:02d}-{e:02d}  {suffix}")
-        else:
-            A, B, C, D, E, F = mains[:6]
-            lines.append(f"{disp}  {A:02d}-{B:02d}-{C:02d}-{D:02d}-{E:02d}-{F:02d}")
+    # find index of the start date
+    start_idx = next((i for i, r in enumerate(rows) if r["date"] == start_mmddyyyy), None)
+    if start_idx is None:
+        return {"ok": False, "rows": [], "blob": ""}
 
-    return {"rows": filtered, "blob": "\n".join(lines)}
+    out = rows[start_idx:start_idx+limit]
+
+    # pretty blob (matches your earlier UI)
+    if game in ("MM", "PB"):
+        blob = "\n".join(
+            f'{datetime.strptime(r["date"], "%m/%d/%Y").strftime("%m-%d-%y")}  '
+            f'{"-".join(f"{n:02d}" for n in r["mains"])}  {r["bonus"]:02d}'
+            for r in out
+        )
+    else:
+        blob = "\n".join(
+            f'{datetime.strptime(r["date"], "%m/%d/%Y").strftime("%m-%d-%y")}  '
+            f'{"-".join(f"{n:02d}" for n in r["mains"])}'
+            for r in out
+        )
+
+    return {"ok": True, "rows": out, "blob": blob}
