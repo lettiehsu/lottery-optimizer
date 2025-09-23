@@ -1,314 +1,439 @@
-from __future__ import annotations
+# ==== PHASE 1 (Evaluation) — complete replacement ====
 
-from typing import Any, Dict, List, Optional, Tuple
-import re
-import hashlib
+import re, json, os, random
+from statistics import median
 
-# --------------------------
-# Helpers to parse blobs/feeds
-# --------------------------
-
-def _lines(s: str) -> List[str]:
-    return [ln.rstrip("\n\r") for ln in (s or "").splitlines() if ln.strip()]
-
-def _to_ints(s: str) -> List[int]:
-    return [int(x) for x in re.findall(r"\d+", s)]
-
-def _pad2(n: int) -> str:
-    return f"{n:02d}"
-
-def _fmt5(date_mdyy: str, mains: List[int], bonus: int) -> str:
-    # date is mm-dd-yy already
-    return f"{date_mdyy}  {'-'.join(_pad2(n) for n in mains)}  {_pad2(bonus)}"
-
-def _fmt6(date_mdyy: str, mains: List[int]) -> str:
-    return f"{date_mdyy}  {'-'.join(_pad2(n) for n in mains)}"
-
-def _parse_mm_pb_line(line: str) -> Optional[Tuple[str, List[int], int]]:
-    # "mm-dd-yy  n1-n2-n3-n4-n5  BB"
-    m = re.match(r"^\s*(\d{2}-\d{2}-\d{2})\s+(\d{2}(?:-\d{2}){4})\s+(\d{2})\s*$", line)
-    if not m:
-        return None
-    date = m.group(1)
-    mains = [int(x) for x in m.group(2).split("-")]
-    bonus = int(m.group(3))
-    if len(mains) != 5:
-        return None
-    return (date, mains, bonus)
-
-def _parse_il_line(line: str) -> Optional[Tuple[str, List[int]]]:
-    # "mm-dd-yy  A-B-C-D-E-F"
-    m = re.match(r"^\s*(\d{2}-\d{2}-\d{2})\s+(\d{2}(?:-\d{2}){5})\s*$", line)
-    if not m:
-        return None
-    date = m.group(1)
-    mains = [int(x) for x in m.group(2).split("-")]
-    if len(mains) != 6:
-        return None
-    return (date, mains)
-
-def _match_count(a: List[int], b: List[int]) -> int:
-    sb = set(b)
-    return sum(1 for x in a if x in sb)
-
-def _pick_cycle(values: List[int], i: int) -> int:
-    return values[i % len(values)] if values else 0
-
-def _md5_int(seed: str) -> int:
-    return int(hashlib.md5(seed.encode("utf-8")).hexdigest(), 16)
-
-# --------------------------
-# FEED parsers (very forgiving)
-# --------------------------
-
-def _parse_feed_hot_overdue(feed: str) -> Tuple[List[int], List[int], List[int]]:
+def _parse_latest_pair(s: str):
     """
-    Returns: (hot8, overdue8, top3_bonus)
-    For IL, top3_bonus will be [].
+    Accepts strings like:
+      '[[  10,  14,  34,  40,  43], 5]'
+      '[[  1,   4,   5,  10,  18,  49], null]'
+    Returns (mains:list[int], bonus:int|None)
     """
-    hot8: List[int] = []
-    overdue8: List[int] = []
-    top3_bonus: List[int] = []
-
-    for ln in _lines(feed):
-        l = ln.lower()
-        if "top 8 hot numbers" in l:
-            hot8 = _to_ints(ln)[:8]
-        elif "top 8 overdue numbers" in l:
-            overdue8 = _to_ints(ln)[:8]
-        elif "top 3 hot mega ball numbers" in l or "top 3 hot power ball numbers" in l:
-            top3_bonus = _to_ints(ln)[:3]
-        elif "top 3 overdue mega ball numbers" in l or "top 3 overdue power ball numbers" in l:
-            # If we didn't get top3 hot, try to use overdue as backup
-            if not top3_bonus:
-                top3_bonus = _to_ints(ln)[:3]
-
-    return (hot8, overdue8, top3_bonus)
-
-# --------------------------
-# Batch builders (deterministic)
-# --------------------------
-
-def _build_batch_mm_pb(
-    nj_mains: List[int],
-    nj_bonus: Optional[int],
-    hist_blob: str,
-    feed_text: str,
-    game_tag: str
-) -> List[str]:
-    """
-    Produce a deterministic 50-row batch:
-      1-20: historical (as supplied, top-down)
-     21-35: historical (first 15) but bonus swapped by cycling top-3 bonus from feed
-     36-50: historical (first 15) with one main replaced by cycling overdue numbers
-    """
-    rows: List[str] = []
-    hist = [_parse_mm_pb_line(ln) for ln in _lines(hist_blob)]
-    hist = [t for t in hist if t]
-
-    # keep exact formatting from blob
-    for t in hist[:20]:
-        if not t: continue
-        rows.append(_fmt5(t[0], t[1], t[2]))
-
-    hot8, overdue8, top3_bonus = _parse_feed_hot_overdue(feed_text)
-    if not top3_bonus:
-        top3_bonus = [1, 2, 3]  # safe fallback
-
-    # 21-35: bonus swap
-    for i, t in enumerate(hist[:15], start=0):
-        if not t: 
-            # pad with something if history shorter
-            date = "01-01-70"
-            mains = [1, 2, 3, 4, 5]
-            bb = _pick_cycle(top3_bonus, i)
+    if not s or "[" not in s:
+        raise ValueError("LATEST_* must be a string like '[..], b' or '[..]'")
+    s = s.strip()
+    # Convert 'null' -> None for JSON parsing
+    js = s.replace("null", "null")
+    try:
+        val = json.loads(js)
+        if not (isinstance(val, list) and len(val) == 2):
+            raise ValueError
+        mains, bonus = val
+        if not isinstance(mains, list):
+            raise ValueError
+        mains = [int(x) for x in mains]
+        if bonus is None:
+            b = None
         else:
-            date, mains, _oldb = t
-            bb = _pick_cycle(top3_bonus, i)
-        rows.append(_fmt5(date, mains, bb))
+            b = int(bonus)
+        return mains, b
+    except Exception:
+        # Fallback: extract digits
+        m = re.findall(r"\d+", s)
+        if not m:
+            raise
+        # Heuristic: if length 5 or 6 first are mains; the last (if present & not 6th main) is bonus
+        nums = list(map(int, m))
+        if len(nums) == 6:  # IL-like
+            return nums, None
+        if len(nums) >= 6:
+            return nums[:-1][:5], nums[-1]
+        if len(nums) == 5:
+            return nums, None
+        raise
 
-    # 36-50: overdue-injected
-    for i, t in enumerate(hist[:15], start=0):
-        if not t:
-            date = "01-01-70"
-            mains = [1, 2, 3, 4, 5]
-            bb = _pick_cycle(top3_bonus, i)
-        else:
-            date, mains, bb = t
-            mains = mains[:]
-            if overdue8:
-                pos = _md5_int(f"{game_tag}-{i}-{sum(mains)}") % 5
-                mains[pos] = _pick_cycle(overdue8, i)
-                mains = sorted(mains)
-        rows.append(_fmt5(date, mains, bb))
-
-    return rows[:50]
-
-def _build_batch_il(
-    hist_jp_blob: str,
-    hist_m1_blob: str,
-    hist_m2_blob: str,
-    feed_text: str
-) -> List[str]:
+def _parse_hist_blob_mm_pb(blob: str):
     """
-    Single 50-row IL batch shared for JP/M1/M2 comparison:
-      1-30: interleave 10 from JP, 10 from M1, 10 from M2
-     31-50: make 20 synthetic rows by taking source rows cyclically and
-            replacing one main with a cycling hot/overdue number from feed.
+    Lines like: '09-12-25  17-18-21-42-64  07'
+    Return list of tuples: (mains:list[int], bonus:int)
     """
-    jp = [_parse_il_line(ln) for ln in _lines(hist_jp_blob)]
-    m1 = [_parse_il_line(ln) for ln in _lines(hist_m1_blob)]
-    m2 = [_parse_il_line(ln) for ln in _lines(hist_m2_blob)]
-    jp = [t for t in jp if t]
-    m1 = [t for t in m1 if t]
-    m2 = [t for t in m2 if t]
-
-    hot8, overdue8, _ = _parse_feed_hot_overdue(feed_text)
-
-    rows: List[str] = []
-    # 1-30 interleave
-    for i in range(10):
-        if i < len(jp): rows.append(_fmt6(jp[i][0], jp[i][1]))
-        if i < len(m1): rows.append(_fmt6(m1[i][0], m1[i][1]))
-        if i < len(m2): rows.append(_fmt6(m2[i][0], m2[i][1]))
-
-    # 31-50 synthetic (from whichever has content)
-    pool = (jp + m1 + m2) or []
-    for i in range(20):
-        if pool:
-            src = pool[i % len(pool)]
-            date, mains = src[0], src[1][:]
+    out = []
+    for line in (blob or "").splitlines():
+        line = line.strip()
+        if not line: 
+            continue
+        parts = re.findall(r"(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\s+(\d{2})", line)
+        if parts:
+            _, mains_str, b_str = parts[0]
+            mains = [int(x) for x in mains_str.split("-")]
+            out.append((mains, int(b_str)))
         else:
-            date, mains = "01-01-70", [1, 2, 3, 4, 5, 6]
-        # pick a slot and replace with a cycling hot/overdue
-        pos = _md5_int(f"IL-{i}-{sum(mains)}") % 6
-        replacement = (_pick_cycle(hot8, i) if i % 2 == 0 else _pick_cycle(overdue8, i))
-        if replacement:
-            mains[pos] = replacement
-            mains = sorted(mains)
-        rows.append(_fmt6(date, mains))
+            # looser: find all ints; last 5 are mains, last is bonus
+            nums = [int(x) for x in re.findall(r"\d+", line)]
+            if len(nums) >= 6:
+                mains = nums[-6:-1] if len(nums) >= 6 else nums[:5]
+                bonus = nums[-1]
+                if len(mains) == 5:
+                    out.append((mains, int(bonus)))
+    return out
 
-    return rows[:50]
+def _parse_hist_blob_il(blob: str):
+    """
+    Lines like: '09-15-25  01-04-05-10-18-49'
+    Return list of mains only.
+    """
+    out = []
+    for line in (blob or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = re.findall(r"(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})", line)
+        if parts:
+            _, mains_str = parts[0]
+            mains = [int(x) for x in mains_str.split("-")]
+            out.append(mains)
+        else:
+            nums = [int(x) for x in re.findall(r"\d+", line)]
+            if len(nums) >= 6:
+                out.append(nums[-6:])
+    return out
 
-# --------------------------
-# Hit tables
-# --------------------------
+def _extract_feed_sets(feed_text: str, bonus_label: str):
+    """
+    Parses FEED_MM/FEED_PB/FEED_IL blocks.
+    For MM/PB: also returns hot_bonus / overdue_bonus (3 each).
+    For IL: returns only hot/overdue mains.
+    """
+    hot = re.findall(r"Top\s+8\s+hot\s+numbers:\s*([0-9,\s]+)", feed_text or "", flags=re.I)
+    over = re.findall(r"Top\s+8\s+overdue\s+numbers:\s*([0-9,\s]+)", feed_text or "", flags=re.I)
+    hot_mains = [int(x) for x in re.findall(r"\d+", hot[0])] if hot else []
+    overdue_mains = [int(x) for x in re.findall(r"\d+", over[0])] if over else []
 
-def _hits_mm_pb(batch: List[str], nj_mains: List[int], nj_bonus: int) -> Dict[str, Any]:
-    cats = {"3":[], "3+B":[], "4":[], "4+B":[], "5":[], "5+B":[]}
-    exact_rows: List[int] = []
-    for idx, line in enumerate(batch, start=1):
-        parsed = _parse_mm_pb_line(line)
-        if not parsed: continue
-        _, mains, bonus = parsed
-        m = _match_count(nj_mains, mains)
-        bonus_hit = (bonus == nj_bonus)
-        if m == 5 and bonus_hit: cats["5+B"].append(idx)
-        elif m == 5: cats["5"].append(idx)
-        elif m == 4 and bonus_hit: cats["4+B"].append(idx)
-        elif m == 4: cats["4"].append(idx)
-        elif m == 3 and bonus_hit: cats["3+B"].append(idx)
-        elif m == 3: cats["3"].append(idx)
-        if m == 5 and bonus_hit:
-            exact_rows.append(idx)
+    hot_bonus = []
+    overdue_bonus = []
+    if bonus_label:
+        hb = re.findall(rf"Top\s+3\s+hot\s+{bonus_label}\s+numbers:\s*([0-9,\s]+)", feed_text or "", flags=re.I)
+        ob = re.findall(rf"Top\s+3\s+overdue\s+{bonus_label}\s+numbers:\s*([0-9,\s]+)", feed_text or "", flags=re.I)
+        hot_bonus = [int(x) for x in re.findall(r"\d+", hb[0])] if hb else []
+        overdue_bonus = [int(x) for x in re.findall(r"\d+", ob[0])] if ob else []
+
     return {
-        "counts": {k: len(v) for k,v in cats.items()},
-        "rows": cats,
-        "exact_rows": exact_rows
+        "hot": hot_mains,
+        "overdue": overdue_mains,
+        "hot_bonus": hot_bonus,
+        "overdue_bonus": overdue_bonus
     }
 
-def _hits_il(batch: List[str], nj_mains: List[int]) -> Dict[str, Any]:
-    cats = {3:[], 4:[], 5:[], 6:[]}
-    for idx, line in enumerate(batch, start=1):
-        parsed = _parse_il_line(line)
-        if not parsed: continue
-        _, mains = parsed
-        m = _match_count(nj_mains, mains)
-        if m in cats: cats[m].append(idx)
+def _undrawn_from_last(hist_mains, last_n=10):
+    """Numbers not appearing in the most recent `last_n` rows."""
+    recent = hist_mains[:last_n]
+    flat = set()
+    for row in recent:
+        flat.update(row)
+    # Full domain guesses: MM/PB 1..70/69; IL 1..50
+    # We'll infer domain from data (max seen).
+    maxv = max((n for row in hist_mains for n in row), default=70)
+    domain = set(range(1, maxv+1))
+    return sorted(list(domain - flat))
+
+def _lrr_from_20(hist_mains):
+    """
+    LRR = numbers that appear exactly twice in last 20, but not in most recent 5 rows.
+    """
+    from collections import Counter
+    cnt = Counter()
+    for row in hist_mains[:20]:
+        cnt.update(row)
+    twice = {n for n, c in cnt.items() if c == 2}
+    recent5 = set(n for row in hist_mains[:5] for n in row)
+    lrr = [n for n in twice if n not in recent5]
+    return sorted(lrr)
+
+def _vip(hot, overdue, lrr):
+    inter = [n for n in hot if n in overdue]
+    if inter:
+        return inter
+    return lrr
+
+def _sum_band(hist_mains):
+    """IQR band (25–75%) on sums of mains, using 20-history."""
+    sums = sorted(sum(r) for r in hist_mains[:20] if r)
+    if not sums:
+        return (0, 10**9)
+    # simple quartiles
+    def q(p):
+        k = (len(sums)-1)*p
+        f = int(k)
+        c = min(f+1, len(sums)-1)
+        if f == c: return sums[f]
+        return sums[f] + (sums[c]-sums[f])*(k-f)
+    return (int(q(0.25)), int(q(0.75)))
+
+def _pick_unique(src, k, avoid=None):
+    avoid = set(avoid or [])
+    choices = [x for x in src if x not in avoid]
+    random.shuffle(choices)
+    return sorted(choices[:k])
+
+def _build_mains(pattern, hot, overdue, undrawn, vip_list, lrr_list, size):
+    """
+    pattern tokens: 'VIP','LRR','Hot','Overdue','Undrawn' with counts.
+    Returns a sorted, unique mains of given size. If cannot satisfy, falls back to random from union.
+    """
+    pool_map = {
+        "VIP": list(vip_list),
+        "LRR": list(lrr_list),
+        "Hot": list(hot),
+        "Overdue": list(overdue),
+        "Undrawn": list(undrawn),
+    }
+    need = []
+    used = set()
+    for token, count in pattern:
+        src = pool_map.get(token, [])
+        take = _pick_unique(src, count, avoid=used)
+        used.update(take)
+        need.extend(take)
+    # If not enough, pad from union (hot+over+undrawn) without dup
+    union = list(dict.fromkeys(hot + overdue + undrawn))
+    for n in union:
+        if len(need) >= size: break
+        if n not in used:
+            need.append(n); used.add(n)
+    # If still short, pad from 1..max
+    if len(need) < size:
+        maxv = max(union+[70])
+        cand = [n for n in range(1, maxv+1) if n not in used]
+        random.shuffle(cand)
+        for n in cand:
+            if len(need) >= size: break
+            need.append(n)
+    need = sorted(need[:size])
+    return need
+
+def _within_band(mains, band):
+    s = sum(mains)
+    return band[0] <= s <= band[1]
+
+# Sampling patterns (compact tuples: (label, [(Type, count)...]) )
+_PAT_MM_PB = [
+    ("1 VIP + 1 Hot + 3 Undrawn",        [("VIP",1),("Hot",1),("Undrawn",3)]),
+    ("1 VIP + 1 Hot + 1 Overdue + 2 U",  [("VIP",1),("Hot",1),("Overdue",1),("Undrawn",2)]),
+    ("1 VIP + 1 Hot + 2 Overdue + 1 U",  [("VIP",1),("Hot",1),("Overdue",2),("Undrawn",1)]),
+    ("1 VIP + 2 Hot + 2 Undrawn",        [("VIP",1),("Hot",2),("Undrawn",2)]),
+    ("1 VIP + 2 Hot + 1 Overdue + 1 U",  [("VIP",1),("Hot",2),("Overdue",1),("Undrawn",1)]),
+    ("1 VIP + 3 Hot + 1 Undrawn",        [("VIP",1),("Hot",3),("Undrawn",1)]),
+    ("1 VIP + 1 Overdue + 3 Undrawn",    [("VIP",1),("Overdue",1),("Undrawn",3)]),
+    ("1 VIP + 2 Overdue + 2 Undrawn",    [("VIP",1),("Overdue",2),("Undrawn",2)]),
+    ("1 VIP + 3 Overdue + 1 Undrawn",    [("VIP",1),("Overdue",3),("Undrawn",1)]),
+
+    ("1 LRR + 1 Hot + 3 Undrawn",        [("LRR",1),("Hot",1),("Undrawn",3)]),
+    ("1 LRR + 1 Hot + 1 Overdue + 2 U",  [("LRR",1),("Hot",1),("Overdue",1),("Undrawn",2)]),
+    ("1 LRR + 1 Hot + 2 Overdue + 1 U",  [("LRR",1),("Hot",1),("Overdue",2),("Undrawn",1)]),
+    ("1 LRR + 2 Hot + 2 Undrawn",        [("LRR",1),("Hot",2),("Undrawn",2)]),
+    ("1 LRR + 2 Hot + 1 Overdue + 1 U",  [("LRR",1),("Hot",2),("Overdue",1),("Undrawn",1)]),
+    ("1 LRR + 3 Hot + 1 Undrawn",        [("LRR",1),("Hot",3),("Undrawn",1)]),
+    ("1 LRR + 1 Overdue + 3 Undrawn",    [("LRR",1),("Overdue",1),("Undrawn",3)]),
+    ("1 LRR + 2 Overdue + 2 Undrawn",    [("LRR",1),("Overdue",2),("Undrawn",2)]),
+    ("1 LRR + 3 Overdue + 1 Undrawn",    [("LRR",1),("Overdue",3),("Undrawn",1)]),
+]
+
+_PAT_IL = [
+    ("1 VIP + 1 Hot + 4 Undrawn",        [("VIP",1),("Hot",1),("Undrawn",4)]),
+    ("1 VIP + 1 Hot + 1 Overdue + 3 U",  [("VIP",1),("Hot",1),("Overdue",1),("Undrawn",3)]),
+    ("1 VIP + 1 Hot + 2 Overdue + 2 U",  [("VIP",1),("Hot",1),("Overdue",2),("Undrawn",2)]),
+    ("1 VIP + 1 Hot + 3 Overdue + 1 U",  [("VIP",1),("Hot",1),("Overdue",3),("Undrawn",1)]),
+    ("1 VIP + 2 Hot + 3 Undrawn",        [("VIP",1),("Hot",2),("Undrawn",3)]),
+    ("1 VIP + 2 Hot + 1 Overdue + 2 U",  [("VIP",1),("Hot",2),("Overdue",1),("Undrawn",2)]),
+    ("1 VIP + 2 Hot + 2 Overdue + 1 U",  [("VIP",1),("Hot",2),("Overdue",2),("Undrawn",1)]),
+    ("1 VIP + 2 Hot + 3 Overdue",        [("VIP",1),("Hot",2),("Overdue",3)]),
+    ("1 VIP + 3 Hot + 2 Undrawn",        [("VIP",1),("Hot",3),("Undrawn",2)]),
+    ("1 VIP + 3 Hot + 1 Overdue + 1 U",  [("VIP",1),("Hot",3),("Overdue",1),("Undrawn",1)]),
+    ("1 VIP + 3 Hot + 2 Overdue",        [("VIP",1),("Hot",3),("Overdue",2)]),
+    ("1 VIP + 4 Hot + 1 Undrawn",        [("VIP",1),("Hot",4),("Undrawn",1)]),
+    ("1 VIP + 4 Hot + 1 Overdue",        [("VIP",1),("Hot",4),("Overdue",1)]),
+    ("1 VIP + 5 Hot",                    [("VIP",1),("Hot",5)]),
+    ("1 VIP + 1 Overdue + 4 Undrawn",    [("VIP",1),("Overdue",1),("Undrawn",4)]),
+    ("1 VIP + 2 Overdue + 3 Undrawn",    [("VIP",1),("Overdue",2),("Undrawn",3)]),
+    ("1 VIP + 3 Overdue + 2 Undrawn",    [("VIP",1),("Overdue",3),("Undrawn",2)]),
+    ("1 VIP + 4 Overdue + 1 Undrawn",    [("VIP",1),("Overdue",4),("Undrawn",1)]),
+    ("1 VIP + 5 Overdue",                [("VIP",1),("Overdue",5)]),
+
+    ("1 LRR + 1 Hot + 4 Undrawn",        [("LRR",1),("Hot",1),("Undrawn",4)]),
+    ("1 LRR + 1 Hot + 1 Overdue + 3 U",  [("LRR",1),("Hot",1),("Overdue",1),("Undrawn",3)]),
+    ("1 LRR + 1 Hot + 2 Overdue + 2 U",  [("LRR",1),("Hot",1),("Overdue",2),("Undrawn",2)]),
+    ("1 LRR + 1 Hot + 3 Overdue + 1 U",  [("LRR",1),("Hot",1),("Overdue",3),("Undrawn",1)]),
+    ("1 LRR + 2 Hot + 3 Undrawn",        [("LRR",1),("Hot",2),("Undrawn",3)]),
+    ("1 LRR + 2 Hot + 1 Overdue + 2 U",  [("LRR",1),("Hot",2),("Overdue",1),("Undrawn",2)]),
+    ("1 LRR + 2 Hot + 2 Overdue + 1 U",  [("LRR",1),("Hot",2),("Overdue",2),("Undrawn",1)]),
+    ("1 LRR + 2 Hot + 3 Overdue",        [("LRR",1),("Hot",2),("Overdue",3)]),
+    ("1 LRR + 3 Hot + 2 Undrawn",        [("LRR",1),("Hot",3),("Undrawn",2)]),
+    ("1 LRR + 3 Hot + 1 Overdue + 1 U",  [("LRR",1),("Hot",3),("Overdue",1),("Undrawn",1)]),
+    ("1 LRR + 3 Hot + 2 Overdue",        [("LRR",1),("Hot",3),("Overdue",2)]),
+    ("1 LRR + 4 Hot + 1 Undrawn",        [("LRR",1),("Hot",4),("Undrawn",1)]),
+    ("1 LRR + 4 Hot + 1 Overdue",        [("LRR",1),("Hot",4),("Overdue",1)]),
+    ("1 LRR + 5 Hot",                    [("LRR",1),("Hot",5)]),
+    ("1 LRR + 1 Overdue + 4 Undrawn",    [("LRR",1),("Overdue",1),("Undrawn",4)]),
+    ("1 LRR + 2 Overdue + 3 Undrawn",    [("LRR",1),("Overdue",2),("Undrawn",3)]),
+    ("1 LRR + 3 Overdue + 2 Undrawn",    [("LRR",1),("Overdue",3),("Undrawn",2)]),
+    ("1 LRR + 4 Overdue + 1 Undrawn",    [("LRR",1),("Overdue",4),("Undrawn",1)]),
+    ("1 LRR + 5 Overdue",                [("LRR",1),("Overdue",5)]),
+]
+
+def _gen_50_for_game(size, patterns, hist_mains, hot, overdue, undrawn, vip_list, lrr_list, band):
+    rows = []
+    pat_idx = 0
+    safety = 0
+    while len(rows) < 50 and safety < 5000:
+        safety += 1
+        label, spec = patterns[pat_idx % len(patterns)]
+        pat_idx += 1
+        mains = _build_mains(spec, hot, overdue, undrawn, vip_list, lrr_list, size)
+        if not _within_band(mains, band):
+            continue
+        # avoid exact duplicates
+        if mains in rows:
+            continue
+        rows.append(mains)
+    return rows
+
+def _count_hits_mm_pb(batch_rows, latest_mains, latest_bonus, batch_bonuses):
+    hits = {"3":[], "4":[], "5":[], "3+B":[], "4+B":[], "5+B":[]}
+    lm = set(latest_mains)
+    for i, (mains, b) in enumerate(zip(batch_rows, batch_bonuses), start=1):
+        m = len(set(mains) & lm)
+        bonus_hit = (latest_bonus is not None and b == latest_bonus)
+        if m == 3:
+            hits["3"].append(i)
+            if bonus_hit: hits["3+B"].append(i)
+        elif m == 4:
+            hits["4"].append(i)
+            if bonus_hit: hits["4+B"].append(i)
+        elif m == 5:
+            hits["5"].append(i)
+            if bonus_hit: hits["5+B"].append(i)
     return {
-        "counts": {str(k): len(v) for k,v in cats.items()},
-        "rows": {str(k): v for k,v in cats.items()}
+        "counts": {k: len(v) for k,v in hits.items()},
+        "rows": hits,
+        "exact_rows": [batch_rows[i-1] + [batch_bonuses[i-1]] for k in hits for i in hits[k]]
     }
 
-# --------------------------
-# Public entry points
-# --------------------------
+def _count_hits_il(batch_rows, latest_mains):
+    hits = {"3":[], "4":[], "5":[], "6":[]}
+    lm = set(latest_mains)
+    for i, mains in enumerate(batch_rows, start=1):
+        m = len(set(mains) & lm)
+        if m == 3: hits["3"].append(i)
+        elif m == 4: hits["4"].append(i)
+        elif m == 5: hits["5"].append(i)
+        elif m == 6: hits["6"].append(i)
+    return {"counts": {k: len(v) for k,v in hits.items()}, "rows": hits}
 
-def handle_run(payload: Dict[str, Any]) -> Dict[str, Any]:
+def handle_run(payload: dict) -> dict:
     """
-    Phase-1:
-      - Build 50-row batch per game
-      - Compute hit tables and echo back
+    Phase 1 entry — expects:
+      LATEST_MM, LATEST_PB (string [['..'], bonus])
+      LATEST_IL_JP, LATEST_IL_M1, LATEST_IL_M2 (string [['..'], null])
+      FEED_MM, FEED_PB, FEED_IL
+      HIST_MM_BLOB, HIST_PB_BLOB (dated) ; HIST_IL_*_BLOB (dated)
+    Returns 50-row batches and hit stats/positions per game.
     """
-    if payload.get("phase") != "phase1":
-        return {"ok": False, "error": "Unsupported phase"}
+    # --- parse inputs ---
+    latest_mm = _parse_latest_pair(payload.get("LATEST_MM",""))
+    latest_pb = _parse_latest_pair(payload.get("LATEST_PB",""))
+    latest_il_jp = _parse_latest_pair(payload.get("LATEST_IL_JP",""))
+    latest_il_m1 = _parse_latest_pair(payload.get("LATEST_IL_M1",""))
+    latest_il_m2 = _parse_latest_pair(payload.get("LATEST_IL_M2",""))
 
-    # Parse LATEST_* (strings like "[[mains..], bonus]" or "[[mains..], null]")
-    def _parse_latest(x) -> Optional[Tuple[List[int], Optional[int]]]:
-        try:
-            if isinstance(x, str):
-                obj = eval(x, {}, {})  # inputs are controlled from our UI; still keep minimal eval
-            else:
-                obj = x
-            mains = [int(n) for n in obj[0]]
-            bonus = None if obj[1] is None else int(obj[1])
-            return (mains, bonus)
-        except Exception:
-            return None
+    hist_mm = _parse_hist_blob_mm_pb(payload.get("HIST_MM_BLOB",""))
+    hist_pb = _parse_hist_blob_mm_pb(payload.get("HIST_PB_BLOB",""))
+    hist_il_jp = _parse_hist_blob_il(payload.get("HIST_IL_JP_BLOB",""))
+    hist_il_m1 = _parse_hist_blob_il(payload.get("HIST_IL_M1_BLOB",""))
+    hist_il_m2 = _parse_hist_blob_il(payload.get("HIST_IL_M2_BLOB",""))
 
-    L_MM = _parse_latest(payload.get("LATEST_MM"))
-    L_PB = _parse_latest(payload.get("LATEST_PB"))
-    L_IJP = _parse_latest(payload.get("LATEST_IL_JP"))
-    L_IM1 = _parse_latest(payload.get("LATEST_IL_M1"))
-    L_IM2 = _parse_latest(payload.get("LATEST_IL_M2"))
+    feed_mm = _extract_feed_sets(payload.get("FEED_MM",""), "Mega Ball")
+    feed_pb = _extract_feed_sets(payload.get("FEED_PB",""), "Power Ball")
+    feed_il = _extract_feed_sets(payload.get("FEED_IL",""), "")  # no bonus label
 
-    # Build batches
-    batch_mm: List[str] = []
-    batch_pb: List[str] = []
-    batch_il: List[str] = []
+    # --- derive helper sets per game ---
+    mm_mains_hist = [m for m,_ in hist_mm]
+    pb_mains_hist = [m for m,_ in hist_pb]
+    il_hist_all = hist_il_jp  # for undrawn/LRR we can use JP track as baseline
 
-    if L_MM:
-        batch_mm = _build_batch_mm_pb(
-            L_MM[0], L_MM[1] or 0,
-            payload.get("HIST_MM_BLOB",""),
-            payload.get("FEED_MM",""),
-            "MM"
-        )
+    mm_undrawn = _undrawn_from_last(mm_mains_hist, 10)
+    pb_undrawn = _undrawn_from_last(pb_mains_hist, 10)
+    il_undrawn = _undrawn_from_last(il_hist_all, 10)
 
-    if L_PB:
-        batch_pb = _build_batch_mm_pb(
-            L_PB[0], L_PB[1] or 0,
-            payload.get("HIST_PB_BLOB",""),
-            payload.get("FEED_PB",""),
-            "PB"
-        )
+    mm_lrr = _lrr_from_20(mm_mains_hist)
+    pb_lrr = _lrr_from_20(pb_mains_hist)
+    il_lrr = _lrr_from_20(il_hist_all)
 
-    # IL single batch used for JP/M1/M2 hits
-    if any([L_IJP, L_IM1, L_IM2]):
-        batch_il = _build_batch_il(
-            payload.get("HIST_IL_JP_BLOB",""),
-            payload.get("HIST_IL_M1_BLOB",""),
-            payload.get("HIST_IL_M2_BLOB",""),
-            payload.get("FEED_IL",""),
-        )
+    mm_vip = _vip(feed_mm["hot"], feed_mm["overdue"], mm_lrr)
+    pb_vip = _vip(feed_pb["hot"], feed_pb["overdue"], pb_lrr)
+    il_vip = _vip(feed_il["hot"], feed_il["overdue"], il_lrr)
 
-    # Hit tables
-    mm_hits = _hits_mm_pb(batch_mm, *(L_MM or ([0,0,0,0,0],0)))
-    pb_hits = _hits_mm_pb(batch_pb, *(L_PB or ([0,0,0,0,0],0)))
+    mm_band = _sum_band(mm_mains_hist)
+    pb_band = _sum_band(pb_mains_hist)
+    il_band = _sum_band(il_hist_all)
 
-    il_jp_hits = _hits_il(batch_il, L_IJP[0]) if L_IJP else {"counts":{}, "rows":{}}
-    il_m1_hits = _hits_il(batch_il, L_IM1[0]) if L_IM1 else {"counts":{}, "rows":{}}
-    il_m2_hits = _hits_il(batch_il, L_IM2[0]) if L_IM2 else {"counts":{}, "rows":{}}
+    # --- generate 50 rows per game using patterns & band filter ---
+    random.seed(42)  # deterministic for UI; you can swap to env-seeded if you prefer
+    # MM/PB mains (5 each)
+    batch_mm_mains = _gen_50_for_game(5, _PAT_MM_PB, mm_mains_hist, feed_mm["hot"], feed_mm["overdue"], mm_undrawn, mm_vip, mm_lrr, mm_band)
+    batch_pb_mains = _gen_50_for_game(5, _PAT_MM_PB, pb_mains_hist, feed_pb["hot"], feed_pb["overdue"], pb_undrawn, pb_vip, pb_lrr, pb_band)
+    # IL mains (6)
+    batch_il_mains = _gen_50_for_game(6, _PAT_IL, il_hist_all, feed_il["hot"], feed_il["overdue"], il_undrawn, il_vip, il_lrr, il_band)
 
-    res: Dict[str, Any] = {
+    # --- assign bonus numbers for MM/PB ---
+    # Mega/Power ball selection: either from hot/overdue bonus or undrawn bonus from last 10 draws (we approximate with hot/overdue pools + spillover 1..max)
+    def gen_bonuses(hot_b, over_b, count, maxb=25):
+        pool = list(dict.fromkeys(hot_b + over_b))
+        if not pool:
+            pool = list(range(1, maxb+1))
+        out = []
+        for _ in range(count):
+            out.append(random.choice(pool))
+        return out
+
+    mm_bonus_rows = gen_bonuses(feed_mm["hot_bonus"], feed_mm["overdue_bonus"], len(batch_mm_mains), maxb=25)
+    pb_bonus_rows = gen_bonuses(feed_pb["hot_bonus"], feed_pb["overdue_bonus"], len(batch_pb_mains), maxb=26)
+
+    # --- compute hits against the 2nd newest jackpots (provided LATEST_* inputs) ---
+    mm_latest_m, mm_latest_b = latest_mm
+    pb_latest_m, pb_latest_b = latest_pb
+    il_latest_jp, _ = latest_il_jp
+    il_latest_m1, _ = latest_il_m1
+    il_latest_m2, _ = latest_il_m2
+
+    mm_hits = _count_hits_mm_pb(batch_mm_mains, mm_latest_m, mm_latest_b, mm_bonus_rows)
+    pb_hits = _count_hits_mm_pb(batch_pb_mains, pb_latest_m, pb_latest_b, pb_bonus_rows)
+    il_jp_hits = _count_hits_il(batch_il_mains, il_latest_jp)
+    il_m1_hits = _count_hits_il(batch_il_mains, il_latest_m1)
+    il_m2_hits = _count_hits_il(batch_il_mains, il_latest_m2)
+
+    # --- pretty batches for UI ---
+    def fmt_row(nums, bonus=None):
+        body = "-".join(str(n).zfill(2) for n in nums)
+        return f"{body}  {str(bonus).zfill(2)}" if bonus is not None else body
+
+    ui_mm = [fmt_row(r, b) for r,b in zip(batch_mm_mains, mm_bonus_rows)]
+    ui_pb = [fmt_row(r, b) for r,b in zip(batch_pb_mains, pb_bonus_rows)]
+    ui_il = [fmt_row(r) for r in batch_il_mains]
+
+    # Optional save
+    saved_path = f"/tmp/lotto_1_{os.environ.get('RENDER', 'local')}_{random.randint(1000,9999)}.json"
+    try:
+        with open(saved_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "phase":"phase1",
+                "BATCH_MM": batch_mm_mains, "BATCH_MM_BONUS": mm_bonus_rows,
+                "BATCH_PB": batch_pb_mains, "BATCH_PB_BONUS": pb_bonus_rows,
+                "BATCH_IL": batch_il_mains,
+                "HITS_MM": mm_hits, "HITS_PB": pb_hits,
+                "HITS_IL_JP": il_jp_hits, "HITS_IL_M1": il_m1_hits, "HITS_IL_M2": il_m2_hits
+            }, f)
+    except Exception:
+        saved_path = None
+
+    return {
         "ok": True,
         "phase": "phase1",
+        "saved_path": saved_path,
         "echo": {
-            # batches back to UI
-            "BATCH_MM": batch_mm,
-            "BATCH_PB": batch_pb,
-            "BATCH_IL": batch_il,
-            # hit tables
+            "BATCH_MM": ui_mm,
+            "BATCH_PB": ui_pb,
+            "BATCH_IL": ui_il,
             "HITS_MM": mm_hits,
             "HITS_PB": pb_hits,
             "HITS_IL_JP": il_jp_hits,
@@ -316,7 +441,3 @@ def handle_run(payload: Dict[str, Any]) -> Dict[str, Any]:
             "HITS_IL_M2": il_m2_hits,
         }
     }
-    return res
-
-def handle_confirm(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {"ok": True, "phase": "confirm", "echo": payload}
