@@ -1,251 +1,367 @@
-/* global fetch */
-const $ = (sel) => document.querySelector(sel);
-const set = (id, v) => { const el = $(id); if (el) el.value = v; };
-const text = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-const html = (id, v) => { const el = $(id); if (el) el.innerHTML = v; };
-const byId = (id) => document.getElementById(id);
+/* static/app.js — complete
+   - CSV upload -> /store/import_csv
+   - Retrieve LATEST_* (MM, PB, IL JP/M1/M2) -> /store/get_by_date
+   - Load 20 history blobs (MM, PB, IL JP/M1/M2) -> /store/get_history
+   - Run Phase 1 -> /run_json with phase:'phase1'
+*/
 
-// ---------- Helpers ----------
-function toMMDDYYYY(dateStr) {
-  // input is yyyy-mm-dd from <input type="date">
-  if (!dateStr) return "";
-  const [y, m, d] = dateStr.split("-");
-  return `${m}/${d}/${y}`;
-}
-function fmtLineMM(row) {
-  // ["02-22-23-56-70  08", ...] already formatted by backend
-  return row;
-}
-function fmtLinePB(row) { return row; }
-function fmtLineIL(row) { return row; }
-
-async function getJSON(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return r.json();
-}
-async function postJSON(url, body) {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(body)
-  });
-  if (!r.ok) {
-    let txt = await r.text();
-    throw new Error(txt || r.statusText);
-  }
-  return r.json();
-}
-
-// ---------- Upload ----------
-byId("btnImport").addEventListener("click", async () => {
-  const f = byId("csvFile").files[0];
-  const overwrite = byId("overwrite").checked;
-  const status = byId("importStatus");
-  try {
-    if (!f) { status.textContent = "Choose a file first."; return; }
-    const fd = new FormData();
-    fd.append("file", f, f.name);
-    fd.append("overwrite", overwrite ? "true" : "false");
-    const r = await fetch("/store/import_csv", { method:"POST", body: fd });
-    const j = await r.json();
-    status.textContent = JSON.stringify(j);
-  } catch(e){
-    status.textContent = `Upload failed: ${e}`;
-  }
-});
-
-// ---------- Retrieve (2nd newest jackpots) ----------
-byId("btnMM").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("mmDate").value);
-  if (!d) return alert("Pick MM date");
-  try {
-    const j = await getJSON(`/store/get_by_date?game=MM&date=${encodeURIComponent(d)}`);
-    // Server returns row = {mains:[...], bonus:n}
-    set("#LATEST_MM", JSON.stringify([j.row.mains, j.row.bonus]));
-  } catch(e){ alert(`Retrieve failed (MM): ${e}`); }
-});
-
-byId("btnPB").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("pbDate").value);
-  if (!d) return alert("Pick PB date");
-  try {
-    const j = await getJSON(`/store/get_by_date?game=PB&date=${encodeURIComponent(d)}`);
-    set("#LATEST_PB", JSON.stringify([j.row.mains, j.row.bonus]));
-  } catch(e){ alert(`Retrieve failed (PB): ${e}`); }
-});
-
-byId("btnILJP").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("ilJPDate").value);
-  if (!d) return alert("Pick IL JP date");
-  try {
-    const j = await getJSON(`/store/get_by_date?game=IL_JP&date=${encodeURIComponent(d)}`);
-    set("#LATEST_IL_JP", JSON.stringify([j.row.mains, null]));
-  } catch(e){ alert(`Retrieve failed (IL JP): ${e}`); }
-});
-byId("btnILM1").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("ilM1Date").value);
-  if (!d) return alert("Pick IL M1 date");
-  try {
-    const j = await getJSON(`/store/get_by_date?game=IL_M1&date=${encodeURIComponent(d)}`);
-    set("#LATEST_IL_M1", JSON.stringify([j.row.mains, null]));
-  } catch(e){ alert(`Retrieve failed (IL M1): ${e}`); }
-});
-byId("btnILM2").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("ilM2Date").value);
-  if (!d) return alert("Pick IL M2 date");
-  try {
-    const j = await getJSON(`/store/get_by_date?game=IL_M2&date=${encodeURIComponent(d)}`);
-    set("#LATEST_IL_M2", JSON.stringify([j.row.mains, null]));
-  } catch(e){ alert(`Retrieve failed (IL M2): ${e}`); }
-});
-
-// ---------- Load 20 history (3rd newest down) ----------
-byId("btnHistMM").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("histMMDate").value);
-  if (!d) return alert("Pick HIST MM start date (the 3rd newest)");
-  try {
-    const j = await getJSON(`/store/get_history?game=MM&from=${encodeURIComponent(d)}&limit=20`);
-    set("#HIST_MM_BLOB", j.blob || "");
-  } catch(e){ alert(`Load 20 failed (HIST MM): ${e}`); }
-});
-byId("btnHistPB").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("histPBDate").value);
-  if (!d) return alert("Pick HIST PB start date (the 3rd newest)");
-  try {
-    const j = await getJSON(`/store/get_history?game=PB&from=${encodeURIComponent(d)}&limit=20`);
-    set("#HIST_PB_BLOB", j.blob || "");
-  } catch(e){ alert(`Load 20 failed (HIST PB): ${e}`); }
-});
-byId("btnHistILJP").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("histILJPDate").value);
-  if (!d) return alert("Pick HIST IL JP start date (the 3rd newest)");
-  try {
-    const j = await getJSON(`/store/get_history?game=IL_JP&from=${encodeURIComponent(d)}&limit=20`);
-    set("#HIST_IL_JP_BLOB", j.blob || "");
-  } catch(e){ alert(`Load 20 failed (HIST IL JP): ${e}`); }
-});
-byId("btnHistILM1").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("histILM1Date").value);
-  if (!d) return alert("Pick HIST IL M1 start date (the 3rd newest)");
-  try {
-    const j = await getJSON(`/store/get_history?game=IL_M1&from=${encodeURIComponent(d)}&limit=20`);
-    set("#HIST_IL_M1_BLOB", j.blob || "");
-  } catch(e){ alert(`Load 20 failed (HIST IL M1): ${e}`); }
-});
-byId("btnHistILM2").addEventListener("click", async () => {
-  const d = toMMDDYYYY(byId("histILM2Date").value);
-  if (!d) return alert("Pick HIST IL M2 start date (the 3rd newest)");
-  try {
-    const j = await getJSON(`/store/get_history?game=IL_M2&from=${encodeURIComponent(d)}&limit=20`);
-    set("#HIST_IL_M2_BLOB", j.blob || "");
-  } catch(e){ alert(`Load 20 failed (HIST IL M2): ${e}`); }
-});
-
-// ---------- Run Phase 1 ----------
-byId("runPhase1").addEventListener("click", async () => {
-  const payload = {
-    phase: "phase1",
-    LATEST_MM: byId("LATEST_MM").value.trim(),
-    LATEST_PB: byId("LATEST_PB").value.trim(),
-    LATEST_IL_JP: byId("LATEST_IL_JP").value.trim(),
-    LATEST_IL_M1: byId("LATEST_IL_M1").value.trim(),
-    LATEST_IL_M2: byId("LATEST_IL_M2").value.trim(),
-    FEED_MM: byId("FEED_MM").value.trim(),
-    FEED_PB: byId("FEED_PB").value.trim(),
-    FEED_IL: byId("FEED_IL").value.trim(),
-    HIST_MM_BLOB: byId("HIST_MM_BLOB").value.trim(),
-    HIST_PB_BLOB: byId("HIST_PB_BLOB").value.trim(),
-    HIST_IL_JP_BLOB: byId("HIST_IL_JP_BLOB").value.trim(),
-    HIST_IL_M1_BLOB: byId("HIST_IL_M1_BLOB").value.trim(),
-    HIST_IL_M2_BLOB: byId("HIST_IL_M2_BLOB").value.trim(),
+(() => {
+  // ---------- tiny helpers ----------
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const j = (o) => JSON.stringify(o, null, 2);
+  const todayStr = () => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yy = d.getFullYear();
+    return `${mm}/${dd}/${yy}`;
   };
+  const toast = (msg, elOut) => {
+    if (elOut) elOut.value = typeof msg === 'string' ? msg : j(msg);
+    console.log(msg);
+  };
+  const asText = (res) => (res.ok ? res.text() : res.text().then(t => { throw new Error(t); }));
+  const asJSON = (res) => (res.ok ? res.json() : res.text().then(t => { throw new Error(t); }));
 
-  try {
-    const res = await postJSON("/run_json", payload);
-    if (!res.ok) {
-      byId("phase1Msg").textContent = "Phase 1 error";
+  // ---------- DOM refs ----------
+  // CSV upload
+  const fileInput = $('#csvFile');
+  const overwriteChk = $('#overwrite');
+  const uploadBtn = $('#importBtn');
+  const uploadOut = $('#uploadOut');
+
+  // LATEST: MM / PB
+  const mmDate = $('#mmDate');
+  const mmPreview = $('#mmPreview');
+  const mmBtn = $('#mmRetrieve');
+
+  const pbDate = $('#pbDate');
+  const pbPreview = $('#pbPreview');
+  const pbBtn = $('#pbRetrieve');
+
+  // LATEST: IL (JP / M1 / M2)
+  const ilJPDate = $('#ilJPDate');
+  const ilJPPreview = $('#ilJPPreview');
+  const ilJPBtn = $('#ilJPRetrieve');
+
+  const ilM1Date = $('#ilM1Date');
+  const ilM1Preview = $('#ilM1Preview');
+  const ilM1Btn = $('#ilM1Retrieve');
+
+  const ilM2Date = $('#ilM2Date');
+  const ilM2Preview = $('#ilM2Preview');
+  const ilM2Btn = $('#ilM2Retrieve');
+
+  // FEEDS
+  const feedMM = $('#feedMM');
+  const feedPB = $('#feedPB');
+  const feedIL = $('#feedIL');
+
+  // HISTORY: start dates + textareas + load buttons
+  const histMMDate = $('#histMMDate');
+  const histMMBlob = $('#histMMBlob');
+  const histMMLoad = $('#histMMLoad');
+
+  const histPBDate = $('#histPBDate');
+  const histPBBlob = $('#histPBBlob');
+  const histPBLoad = $('#histPBLoad');
+
+  const histILJPDate = $('#histILJPDate');
+  const histILJPBlob = $('#histILJPBlob');
+  const histILJPLoad = $('#histILJPLoad');
+
+  const histILM1Date = $('#histILM1Date');
+  const histILM1Blob = $('#histILM1Blob');
+  const histILM1Load = $('#histILM1Load');
+
+  const histILM2Date = $('#histILM2Date');
+  const histILM2Blob = $('#histILM2Blob');
+  const histILM2Load = $('#histILM2Load');
+
+  // RUN PHASE 1
+  const runBtn = $('#runPhase1');
+  const pathBox = $('#phase1Path');
+  const resultRaw = $('#phase1Result'); // raw (debug) – still kept but we now render cards
+  const cardsWrap = $('#phase1Cards');   // pretty layout container
+
+  // ---------- CSV upload ----------
+  uploadBtn?.addEventListener('click', async () => {
+    if (!fileInput.files?.length) {
+      toast('Pick a CSV first', uploadOut);
       return;
     }
-    if (res.saved_path) byId("phase1Path").value = res.saved_path;
-    byId("phase1Msg").textContent = "Done";
+    const fd = new FormData();
+    fd.append('file', fileInput.files[0]);
+    fd.append('overwrite', overwriteChk.checked ? 'true' : 'false');
+    try {
+      const res = await fetch('/store/import_csv', { method: 'POST', body: fd });
+      const data = await asJSON(res);
+      uploadOut.value = j(data);
+    } catch (e) {
+      uploadOut.value = String(e);
+    }
+  });
 
-    const E = (res.echo || {});
-    renderBatch("#mmBatch", E.BATCH_MM || [], fmtLineMM);
-    renderBatch("#pbBatch", E.BATCH_PB || [], fmtLinePB);
-    renderBatch("#ilBatch", E.BATCH_IL || [], fmtLineIL);
-
-    renderHitsMM("#mmStats", "#mmRows", "#mmCounts", E.HITS_MM);
-    renderHitsMM("#pbStats", "#pbRows", "#pbCounts", E.HITS_PB);
-    renderHitsIL("#ilStats", "#ilRows", "#ilCounts", {
-      JP: E.HITS_IL_JP, M1: E.HITS_IL_M1, M2: E.HITS_IL_M2
-    });
-
-  } catch(e){
-    byId("phase1Msg").textContent = `Error: ${e}`;
+  // ---------- LATEST by date (helpers) ----------
+  async function getLatest(game, date, tier = null) {
+    const params = new URLSearchParams({ game, date });
+    if (tier) params.set('tier', tier);
+    const res = await fetch(`/store/get_by_date?${params.toString()}`);
+    const js = await asJSON(res);
+    if (!js.ok) throw new Error(js.detail || js.error || 'not ok');
+    return js.row; // { mains:[...], bonus:int|null, iso:'MM/DD/YYYY' }
   }
-});
 
-// ---------- renderers ----------
-function renderBatch(listSel, lines, fmt) {
-  const el = $(listSel);
-  el.innerHTML = "";
-  lines.forEach((row) => {
-    const li = document.createElement("li");
-    li.textContent = fmt(row);
-    el.appendChild(li);
-  });
-}
-
-function renderHitsMM(statsSel, rowsSel, countsSel, H) {
-  if (!H) { html(statsSel, ""); text(rowsSel,""); text(countsSel,""); return; }
-  const chips = [];
-  const order = ["3","3+B","4","4+B","5","5+B"];
-  order.forEach(k=>{
-    const c = (H.counts && H.counts[k]) || 0;
-    chips.push(`<span class="chip">${k}: ${c}</span>`);
-  });
-  html(statsSel, chips.join(" "));
-  text(countsSel, "");
-  const lines = [];
-  order.forEach(k=>{
-    const arr = (H.rows && H.rows[k]) || [];
-    lines.push(`${k}: ${arr.join(", ") || "—"}`);
-  });
-  lines.push("");
-  if (Array.isArray(H.exact_rows) && H.exact_rows.length){
-    lines.push("Exact rows (mains + bonus):");
-    H.exact_rows.forEach(r => lines.push(JSON.stringify(r)));
+  function fmtLatest(row, isIL = false) {
+    // show as [[mains], bonus] with bonus=null for IL
+    return `[${JSON.stringify(row.mains)}, ${isIL ? 'null' : (row.bonus ?? 'null')}]`;
+    // example: [[10,14,34,40,43], 5] ; IL => [[2,7,25,30,44,49], null]
   }
-  $(rowsSel).textContent = lines.join("\n");
-}
 
-function renderHitsIL(statsSel, rowsSel, countsSel, obj) {
-  // Show combined chips for JP/M1/M2
-  const chips = [];
-  ["JP","M1","M2"].forEach(tag=>{
-    const H = obj[tag] || {};
-    const c3 = (H.counts && H.counts["3"])||0;
-    const c4 = (H.counts && H.counts["4"])||0;
-    const c5 = (H.counts && H.counts["5"])||0;
-    const c6 = (H.counts && H.counts["6"])||0;
-    chips.push(`<span class="chip">${tag} 3:${c3}</span>`);
-    chips.push(`<span class="chip">${tag} 4:${c4}</span>`);
-    chips.push(`<span class="chip">${tag} 5:${c5}</span>`);
-    chips.push(`<span class="chip">${tag} 6:${c6}</span>`);
+  // MM
+  mmBtn?.addEventListener('click', async () => {
+    try {
+      const row = await getLatest('MM', mmDate.value.trim());
+      mmPreview.value = fmtLatest(row, false);
+    } catch (e) {
+      mmPreview.value = `Retrieve failed (MM): ${String(e).slice(0, 180)}`;
+    }
   });
-  html(statsSel, chips.join(" "));
 
-  const lines = [];
-  ["JP","M1","M2"].forEach(tag=>{
-    const H = obj[tag] || {};
-    lines.push(`${tag} rows:`);
-    ["3","4","5","6"].forEach(k=>{
-      const arr = (H.rows && H.rows[k]) || [];
-      lines.push(`  ${k}: ${arr.join(", ") || "—"}`);
-    });
-    lines.push("");
+  // PB
+  pbBtn?.addEventListener('click', async () => {
+    try {
+      const row = await getLatest('PB', pbDate.value.trim());
+      pbPreview.value = fmtLatest(row, false);
+    } catch (e) {
+      pbPreview.value = `Retrieve failed (PB): ${String(e).slice(0, 180)}`;
+    }
   });
-  $(rowsSel).textContent = lines.join("\n");
-  text(countsSel, "");
-}
+
+  // IL tiers
+  ilJPBtn?.addEventListener('click', async () => {
+    try {
+      const row = await getLatest('IL', ilJPDate.value.trim(), 'JP');
+      ilJPPreview.value = fmtLatest(row, true);
+    } catch (e) {
+      ilJPPreview.value = `Retrieve failed (IL_JP): ${String(e).slice(0, 180)}`;
+    }
+  });
+
+  ilM1Btn?.addEventListener('click', async () => {
+    try {
+      const row = await getLatest('IL', ilM1Date.value.trim(), 'M1');
+      ilM1Preview.value = fmtLatest(row, true);
+    } catch (e) {
+      ilM1Preview.value = `Retrieve failed (IL_M1): ${String(e).slice(0, 180)}`;
+    }
+  });
+
+  ilM2Btn?.addEventListener('click', async () => {
+    try {
+      const row = await getLatest('IL', ilM2Date.value.trim(), 'M2');
+      ilM2Preview.value = fmtLatest(row, true);
+    } catch (e) {
+      ilM2Preview.value = `Retrieve failed (IL_M2): ${String(e).slice(0, 180)}`;
+    }
+  });
+
+  // ---------- HISTORY (Load 20) ----------
+  async function loadHistory(game, startDate, limit = 20, tier = null) {
+    const p = new URLSearchParams({ game, from: startDate, limit: String(limit) });
+    if (tier) p.set('tier', tier);
+    const res = await fetch(`/store/get_history?${p.toString()}`);
+    const js = await asJSON(res);
+    if (!js.ok) throw new Error(js.detail || js.error || 'not ok');
+    // js.rows = [{iso:'MM/DD/YY', mains:[...], bonus:int|null}, ...]
+    // js.blob = text block already formatted (server did it)
+    return js;
+  }
+
+  histMMLoad?.addEventListener('click', async () => {
+    try {
+      const js = await loadHistory('MM', histMMDate.value.trim(), 20);
+      histMMBlob.value = js.blob || (js.rows || []).map(r =>
+        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}  ${String(r.bonus ?? '').padStart(2, '0')}`
+      ).join('\n');
+    } catch (e) {
+      histMMBlob.value = `Load failed (MM): ${String(e).slice(0, 200)}`;
+    }
+  });
+
+  histPBLoad?.addEventListener('click', async () => {
+    try {
+      const js = await loadHistory('PB', histPBDate.value.trim(), 20);
+      histPBBlob.value = js.blob || (js.rows || []).map(r =>
+        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}  ${String(r.bonus ?? '').padStart(2, '0')}`
+      ).join('\n');
+    } catch (e) {
+      histPBBlob.value = `Load failed (PB): ${String(e).slice(0, 200)}`;
+    }
+  });
+
+  histILJPLoad?.addEventListener('click', async () => {
+    try {
+      const js = await loadHistory('IL', histILJPDate.value.trim(), 20, 'JP');
+      histILJPBlob.value = js.blob || (js.rows || []).map(r =>
+        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}`
+      ).join('\n');
+    } catch (e) {
+      histILJPBlob.value = `Load failed (IL_JP): ${String(e).slice(0, 200)}`;
+    }
+  });
+
+  histILM1Load?.addEventListener('click', async () => {
+    try {
+      const js = await loadHistory('IL', histILM1Date.value.trim(), 20, 'M1');
+      histILM1Blob.value = js.blob || (js.rows || []).map(r =>
+        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}`
+      ).join('\n');
+    } catch (e) {
+      histILM1Blob.value = `Load failed (IL_M1): ${String(e).slice(0, 200)}`;
+    }
+  });
+
+  histILM2Load?.addEventListener('click', async () => {
+    try {
+      const js = await loadHistory('IL', histILM2Date.value.trim(), 20, 'M2');
+      histILM2Blob.value = js.blob || (js.rows || []).map(r =>
+        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}`
+      ).join('\n');
+    } catch (e) {
+      histILM2Blob.value = `Load failed (IL_M2): ${String(e).slice(0, 200)}`;
+    }
+  });
+
+  // ---------- Phase 1 render cards ----------
+  function chip(label, value) {
+    return `<span class="chip">${label}: <b>${value}</b></span>`;
+  }
+  function renderBatch(list, isIL = false) {
+    return `<pre class="batch">${list.map((line, i) => `${String(i + 1).padStart(2, '0')}. ${line}`).join('\n')}</pre>`;
+  }
+  function renderRowsIdx(rows) {
+    const show = (k) => (rows[k] && rows[k].length ? rows[k].join(', ') : '—');
+    return `
+      <div class="rows">
+        <div>3: ${show('3')}</div>
+        <div>3+B: ${show('3+B')}</div>
+        <div>4: ${show('4')}</div>
+        <div>4+B: ${show('4+B')}</div>
+        <div>5: ${show('5')}</div>
+        <div>5+B: ${show('5+B')}</div>
+      </div>`;
+  }
+  function renderILRowsIdx(rows) {
+    const show = (k) => (rows[k] && rows[k].length ? rows[k].join(', ') : '—');
+    return `
+      <div class="rows">
+        <div>3: ${show('3')}</div>
+        <div>4: ${show('4')}</div>
+        <div>5: ${show('5')}</div>
+        <div>6: ${show('6')}</div>
+      </div>`;
+  }
+  function renderGameCard(title, batch, stats, rows, extra = '') {
+    const statsHtml = Object.entries(stats)
+      .map(([k, v]) => chip(k, v))
+      .join(' ');
+    const rowsHtml = title.startsWith('IL ')
+      ? renderILRowsIdx(rows)
+      : renderRowsIdx(rows);
+
+    return `
+      <div class="game-card">
+        <div class="game-title">${title}</div>
+        <div class="grid-2">
+          <div>${renderBatch(batch)}</div>
+          <div>
+            <div class="stats">${statsHtml}</div>
+            <div class="rows-title">Row indices</div>
+            ${rowsHtml}
+            ${extra}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function inflatePhase1Cards(payload) {
+    const e = payload.echo || {};
+    const html = [
+      renderGameCard(
+        'Mega Millions — 50 rows',
+        e.BATCH_MM || [],
+        (e.HITS_MM || {}).counts || { '3': 0, '3+B': 0, '4': 0, '4+B': 0, '5': 0, '5+B': 0 },
+        (e.HITS_MM || {}).rows || {}
+      ),
+      renderGameCard(
+        'Powerball — 50 rows',
+        e.BATCH_PB || [],
+        (e.HITS_PB || {}).counts || { '3': 0, '3+B': 0, '4': 0, '4+B': 0, '5': 0, '5+B': 0 },
+        (e.HITS_PB || {}).rows || {}
+      ),
+      renderGameCard(
+        'IL Lotto — 50 rows',
+        e.BATCH_IL || [],
+        (e.HITS_IL_M2 || e.HITS_IL_M1 || e.HITS_IL_JP || {}).counts || { '3': 0, '4': 0, '5': 0, '6': 0 },
+        (e.HITS_IL_M2 || e.HITS_IL_M1 || e.HITS_IL_JP || {}).rows || {},
+        `<div class="tiny-note">Counts shown are against your selected IL tier’s the 2nd newest draw.</div>`
+      )
+    ].join('');
+    cardsWrap.innerHTML = html;
+  }
+
+  // ---------- Run Phase 1 ----------
+  runBtn?.addEventListener('click', async () => {
+    cardsWrap.innerHTML = '';
+    resultRaw.value = '';
+
+    const payload = {
+      phase: 'phase1',
+      run_id: (crypto.getRandomValues(new Uint32Array(1))[0] >>> 0).toString(36),
+
+      FEED_MM: feedMM.value.trim(),
+      FEED_PB: feedPB.value.trim(),
+      FEED_IL: feedIL.value.trim(),
+
+      HIST_MM_BLOB: histMMBlob.value.trim(),
+      HIST_PB_BLOB: histPBBlob.value.trim(),
+      HIST_IL_JP_BLOB: histILJPBlob.value.trim(),
+      HIST_IL_M1_BLOB: histILM1Blob.value.trim(),
+      HIST_IL_M2_BLOB: histILM2Blob.value.trim(),
+
+      LATEST_MM: mmPreview.value.trim(),
+      LATEST_PB: pbPreview.value.trim(),
+      LATEST_IL_JP: ilJPPreview.value.trim(),
+      LATEST_IL_M1: ilM1Preview.value.trim(),
+      LATEST_IL_M2: ilM2Preview.value.trim()
+    };
+
+    try {
+      const res = await fetch('/run_json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const js = await asJSON(res);
+      pathBox.value = js.saved_path || '';
+      resultRaw.value = j(js); // keep raw debug
+      if (js.ok) inflatePhase1Cards(js);
+    } catch (e) {
+      resultRaw.value = String(e);
+    }
+  });
+
+  // sensible defaults
+  if (mmDate) mmDate.value = '09/16/2025';
+  if (pbDate) pbDate.value = '09/17/2025';
+  if (ilJPDate) ilJPDate.value = '09/18/2025';
+  if (ilM1Date) ilM1Date.value = '09/18/2025';
+  if (ilM2Date) ilM2Date.value = '09/18/2025';
+  if (histMMDate) histMMDate.value = '09/12/2025';
+  if (histPBDate) histPBDate.value = '09/13/2025';
+  if (histILJPDate) histILJPDate.value = '09/15/2025';
+  if (histILM1Date) histILM1Date.value = '09/15/2025';
+  if (histILM2Date) histILM2Date.value = '09/15/2025';
+})();
