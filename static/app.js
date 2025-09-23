@@ -1,367 +1,437 @@
-/* static/app.js — complete
-   - CSV upload -> /store/import_csv
-   - Retrieve LATEST_* (MM, PB, IL JP/M1/M2) -> /store/get_by_date
-   - Load 20 history blobs (MM, PB, IL JP/M1/M2) -> /store/get_history
-   - Run Phase 1 -> /run_json with phase:'phase1'
-*/
+/* static/app.js — buttons with clear feedback + full Phase 1 wiring */
 
 (() => {
-  // ---------- tiny helpers ----------
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const j = (o) => JSON.stringify(o, null, 2);
-  const todayStr = () => {
-    const d = new Date();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const yy = d.getFullYear();
-    return `${mm}/${dd}/${yy}`;
+  // ---------- helpers ----------
+  const $ = (sel) => document.querySelector(sel);
+  const j = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const setJSON = (el, obj) => {
+    el.textContent = JSON.stringify(obj, null, 2);
   };
-  const toast = (msg, elOut) => {
-    if (elOut) elOut.value = typeof msg === 'string' ? msg : j(msg);
-    console.log(msg);
+
+  const toast = (msg, type = "info", ms = 2200) => {
+    let t = document.createElement("div");
+    t.className = `toast toast-${type}`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    requestAnimationFrame(() => t.classList.add("show"));
+    setTimeout(() => {
+      t.classList.remove("show");
+      setTimeout(() => t.remove(), 300);
+    }, ms);
   };
-  const asText = (res) => (res.ok ? res.text() : res.text().then(t => { throw new Error(t); }));
-  const asJSON = (res) => (res.ok ? res.json() : res.text().then(t => { throw new Error(t); }));
+
+  const buttonBusy = (btn, on = true, label = "Working…") => {
+    if (!btn) return;
+    if (on) {
+      btn.dataset.label = btn.textContent;
+      btn.textContent = `🟦 ${label}`;
+      btn.classList.add("busy");
+      btn.setAttribute("disabled", "disabled");
+      btn.setAttribute("aria-busy", "true");
+    } else {
+      btn.textContent = btn.dataset.label || btn.textContent.replace(/^🟦\s*/, "");
+      btn.classList.remove("busy");
+      btn.removeAttribute("disabled");
+      btn.removeAttribute("aria-busy");
+    }
+  };
+
+  const getJSON = async (url) => {
+    const r = await fetch(url, { credentials: "same-origin" });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  };
+
+  const postJSON = async (url, payload) => {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const err = data?.detail || data?.error || `${r.status} ${r.statusText}`;
+      throw new Error(err);
+    }
+    return data;
+  };
 
   // ---------- DOM refs ----------
-  // CSV upload
-  const fileInput = $('#csvFile');
-  const overwriteChk = $('#overwrite');
-  const uploadBtn = $('#importBtn');
-  const uploadOut = $('#uploadOut');
+  const uploadOut = $("#uploadOut");
+  const overwrite = $("#overwrite");
+  const csvFile = $("#csvFile");
+  const importBtn = $("#importBtn");
 
-  // LATEST: MM / PB
-  const mmDate = $('#mmDate');
-  const mmPreview = $('#mmPreview');
-  const mmBtn = $('#mmRetrieve');
+  // per-game retrieve (2nd newest JP)
+  const mmDate = $("#mmDate");
+  const pbDate = $("#pbDate");
+  const ilJPDate = $("#ilJPDate");
+  const ilM1Date = $("#ilM1Date");
+  const ilM2Date = $("#ilM2Date");
 
-  const pbDate = $('#pbDate');
-  const pbPreview = $('#pbPreview');
-  const pbBtn = $('#pbRetrieve');
+  const mmPreview = $("#mmPreview");
+  const pbPreview = $("#pbPreview");
+  const ilJPPreview = $("#ilJPPreview");
+  const ilM1Preview = $("#ilM1Preview");
+  const ilM2Preview = $("#ilM2Preview");
 
-  // LATEST: IL (JP / M1 / M2)
-  const ilJPDate = $('#ilJPDate');
-  const ilJPPreview = $('#ilJPPreview');
-  const ilJPBtn = $('#ilJPRetrieve');
+  const mmRetrieve = $("#mmRetrieve");
+  const pbRetrieve = $("#pbRetrieve");
+  const ilJPRetrieve = $("#ilJPRetrieve");
+  const ilM1Retrieve = $("#ilM1Retrieve");
+  const ilM2Retrieve = $("#ilM2Retrieve");
 
-  const ilM1Date = $('#ilM1Date');
-  const ilM1Preview = $('#ilM1Preview');
-  const ilM1Btn = $('#ilM1Retrieve');
+  // feeds
+  const feedMM = $("#feedMM");
+  const feedPB = $("#feedPB");
+  const feedIL = $("#feedIL");
 
-  const ilM2Date = $('#ilM2Date');
-  const ilM2Preview = $('#ilM2Preview');
-  const ilM2Btn = $('#ilM2Retrieve');
+  // history load 20
+  const histMMDate = $("#histMMDate");
+  const histPBDate = $("#histPBDate");
+  const histILJPDate = $("#histILJPDate");
+  const histILM1Date = $("#histILM1Date");
+  const histILM2Date = $("#histILM2Date");
 
-  // FEEDS
-  const feedMM = $('#feedMM');
-  const feedPB = $('#feedPB');
-  const feedIL = $('#feedIL');
+  const histMMLoad = $("#histMMLoad");
+  const histPBLoad = $("#histPBLoad");
+  const histILJPLoad = $("#histILJPLoad");
+  const histILM1Load = $("#histILM1Load");
+  const histILM2Load = $("#histILM2Load");
 
-  // HISTORY: start dates + textareas + load buttons
-  const histMMDate = $('#histMMDate');
-  const histMMBlob = $('#histMMBlob');
-  const histMMLoad = $('#histMMLoad');
+  const histMMBlob = $("#histMMBlob");
+  const histPBBlob = $("#histPBBlob");
+  const histILJPBlob = $("#histILJPBlob");
+  const histILM1Blob = $("#histILM1Blob");
+  const histILM2Blob = $("#histILM2Blob");
 
-  const histPBDate = $('#histPBDate');
-  const histPBBlob = $('#histPBBlob');
-  const histPBLoad = $('#histPBLoad');
+  // run phase 1
+  const runPhase1 = $("#runPhase1");
+  const phase1Path = $("#phase1Path");
+  const phase1Done = $("#phase1Done");
+  const phase1Result = $("#phase1Result");
 
-  const histILJPDate = $('#histILJPDate');
-  const histILJPBlob = $('#histILJPBlob');
-  const histILJPLoad = $('#histILJPLoad');
+  // results zones
+  const mmBatchEl = $("#mmBatch");
+  const pbBatchEl = $("#pbBatch");
+  const ilBatchEl = $("#ilBatch");
 
-  const histILM1Date = $('#histILM1Date');
-  const histILM1Blob = $('#histILM1Blob');
-  const histILM1Load = $('#histILM1Load');
+  const mmStatsEl = $("#mmStats");
+  const pbStatsEl = $("#pbStats");
+  const ilStatsEl = $("#ilStats");
 
-  const histILM2Date = $('#histILM2Date');
-  const histILM2Blob = $('#histILM2Blob');
-  const histILM2Load = $('#histILM2Load');
+  const mmRowsEl = $("#mmRows");
+  const pbRowsEl = $("#pbRows");
+  const ilRowsEl = $("#ilRows");
 
-  // RUN PHASE 1
-  const runBtn = $('#runPhase1');
-  const pathBox = $('#phase1Path');
-  const resultRaw = $('#phase1Result'); // raw (debug) – still kept but we now render cards
-  const cardsWrap = $('#phase1Cards');   // pretty layout container
+  const mmCounts = $("#mmCounts");
+  const pbCounts = $("#pbCounts");
+  const ilCounts = $("#ilCounts");
 
-  // ---------- CSV upload ----------
-  uploadBtn?.addEventListener('click', async () => {
-    if (!fileInput.files?.length) {
-      toast('Pick a CSV first', uploadOut);
-      return;
-    }
+  // ---------- upload ----------
+  importBtn?.addEventListener("click", async () => {
+    const file = csvFile?.files?.[0];
+    if (!file) return toast("Choose a CSV file first.", "warn");
     const fd = new FormData();
-    fd.append('file', fileInput.files[0]);
-    fd.append('overwrite', overwriteChk.checked ? 'true' : 'false');
+    fd.append("file", file);
+    fd.append("overwrite", overwrite?.checked ? "true" : "false");
+    buttonBusy(importBtn, true, "Importing…");
     try {
-      const res = await fetch('/store/import_csv', { method: 'POST', body: fd });
-      const data = await asJSON(res);
-      uploadOut.value = j(data);
+      const r = await fetch("/store/import_csv", {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+      });
+      const data = await r.json();
+      setJSON(uploadOut, data);
+      if (data.ok) toast("CSV imported.", "ok");
+      else toast(data.detail || data.error || "Import failed", "error", 3200);
     } catch (e) {
-      uploadOut.value = String(e);
+      setJSON(uploadOut, { ok: false, error: String(e) });
+      toast(String(e), "error", 3200);
+    } finally {
+      buttonBusy(importBtn, false);
     }
   });
 
-  // ---------- LATEST by date (helpers) ----------
-  async function getLatest(game, date, tier = null) {
-    const params = new URLSearchParams({ game, date });
-    if (tier) params.set('tier', tier);
-    const res = await fetch(`/store/get_by_date?${params.toString()}`);
-    const js = await asJSON(res);
-    if (!js.ok) throw new Error(js.detail || js.error || 'not ok');
-    return js.row; // { mains:[...], bonus:int|null, iso:'MM/DD/YYYY' }
-  }
-
-  function fmtLatest(row, isIL = false) {
-    // show as [[mains], bonus] with bonus=null for IL
-    return `[${JSON.stringify(row.mains)}, ${isIL ? 'null' : (row.bonus ?? 'null')}]`;
-    // example: [[10,14,34,40,43], 5] ; IL => [[2,7,25,30,44,49], null]
-  }
-
-  // MM
-  mmBtn?.addEventListener('click', async () => {
+  // ---------- retrieve 2nd newest (per game) ----------
+  const doRetrieve = async (btn, game, dateStr, previewEl, tier = "") => {
+    if (!dateStr) return toast("Enter a date (MM/DD/YYYY).", "warn");
+    const params = new URLSearchParams({ game, date: dateStr });
+    if (tier) params.set("tier", tier);
+    buttonBusy(btn, true, "Retrieving…");
     try {
-      const row = await getLatest('MM', mmDate.value.trim());
-      mmPreview.value = fmtLatest(row, false);
+      const data = await getJSON(`/store/get_by_date?${params.toString()}`);
+      if (!data?.ok) throw new Error(data?.detail || data?.error || "Retrieve failed");
+      // Expect row = [[mains..], bonus] or [[mains..], null] for IL
+      previewEl.value = JSON.stringify(data.row, null, 0);
+      toast(`${game}${tier ? " " + tier : ""} retrieved.`, "ok");
     } catch (e) {
-      mmPreview.value = `Retrieve failed (MM): ${String(e).slice(0, 180)}`;
+      previewEl.value = "";
+      toast(String(e), "error", 3200);
+    } finally {
+      buttonBusy(btn, false);
     }
-  });
+  };
 
-  // PB
-  pbBtn?.addEventListener('click', async () => {
+  mmRetrieve?.addEventListener("click", () =>
+    doRetrieve(mmRetrieve, "MM", mmDate.value.trim(), mmPreview)
+  );
+  pbRetrieve?.addEventListener("click", () =>
+    doRetrieve(pbRetrieve, "PB", pbDate.value.trim(), pbPreview)
+  );
+  ilJPRetrieve?.addEventListener("click", () =>
+    doRetrieve(ilJPRetrieve, "IL", ilJPDate.value.trim(), ilJPPreview, "JP")
+  );
+  ilM1Retrieve?.addEventListener("click", () =>
+    doRetrieve(ilM1Retrieve, "IL", ilM1Date.value.trim(), ilM1Preview, "M1")
+  );
+  ilM2Retrieve?.addEventListener("click", () =>
+    doRetrieve(ilM2Retrieve, "IL", ilM2Date.value.trim(), ilM2Preview, "M2")
+  );
+
+  // ---------- history load 20 ----------
+  const formatRow = (r) => {
+    // r: {"date":"MM/DD/YYYY","n":[...], "bonus":int|null} (store is flexible)
+    const d = r.date || r.draw_date || "";
+    const dt = d ? new Date(d) : null;
+    const mmddyy = dt
+      ? `${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}-${String(dt.getFullYear()).slice(-2)}`
+      : (r.mmddyy || d);
+    const n = r.n || r.mains || [];
+    const main = Array.isArray(n) ? n.map((x) => String(x).padStart(2, "0")).join("-") : n;
+    const b = (r.bonus ?? r.mb ?? r.pb ?? null);
+    return b == null ? `${mmddyy}  ${main}` : `${mmddyy}  ${main}  ${String(b).padStart(2, "0")}`;
+  };
+
+  const doLoad20 = async (btn, game, startDate, blobEl, tier = "") => {
+    if (!startDate) return toast("Enter a start date.", "warn");
+    const params = new URLSearchParams({ game, from: startDate, limit: "20" });
+    if (tier) params.set("tier", tier);
+    buttonBusy(btn, true, "Loading…");
     try {
-      const row = await getLatest('PB', pbDate.value.trim());
-      pbPreview.value = fmtLatest(row, false);
+      const data = await getJSON(`/store/get_history?${params.toString()}`);
+      let txt = data?.blob;
+      if (!txt) {
+        const rows = data?.rows || [];
+        txt = rows.map(formatRow).join("\n");
+      }
+      blobEl.value = txt || "";
+      toast(`Loaded ${game}${tier ? " " + tier : ""} history.`, "ok");
     } catch (e) {
-      pbPreview.value = `Retrieve failed (PB): ${String(e).slice(0, 180)}`;
+      blobEl.value = "";
+      toast(String(e), "error", 3200);
+    } finally {
+      buttonBusy(btn, false);
     }
-  });
+  };
 
-  // IL tiers
-  ilJPBtn?.addEventListener('click', async () => {
-    try {
-      const row = await getLatest('IL', ilJPDate.value.trim(), 'JP');
-      ilJPPreview.value = fmtLatest(row, true);
-    } catch (e) {
-      ilJPPreview.value = `Retrieve failed (IL_JP): ${String(e).slice(0, 180)}`;
-    }
-  });
+  histMMLoad?.addEventListener("click", () =>
+    doLoad20(histMMLoad, "MM", histMMDate.value.trim(), histMMBlob)
+  );
+  histPBLoad?.addEventListener("click", () =>
+    doLoad20(histPBLoad, "PB", histPBDate.value.trim(), histPBBlob)
+  );
+  histILJPLoad?.addEventListener("click", () =>
+    doLoad20(histILJPLoad, "IL", histILJPDate.value.trim(), histILJPBlob, "JP")
+  );
+  histILM1Load?.addEventListener("click", () =>
+    doLoad20(histILM1Load, "IL", histILM1Date.value.trim(), histILM1Blob, "M1")
+  );
+  histILM2Load?.addEventListener("click", () =>
+    doLoad20(histILM2Load, "IL", histILM2Date.value.trim(), histILM2Blob, "M2")
+  );
 
-  ilM1Btn?.addEventListener('click', async () => {
-    try {
-      const row = await getLatest('IL', ilM1Date.value.trim(), 'M1');
-      ilM1Preview.value = fmtLatest(row, true);
-    } catch (e) {
-      ilM1Preview.value = `Retrieve failed (IL_M1): ${String(e).slice(0, 180)}`;
-    }
-  });
+  // ---------- Phase 1 renderers ----------
+  const clearResults = () => {
+    [mmBatchEl, pbBatchEl, ilBatchEl].forEach((ol) => (ol.innerHTML = ""));
+    [mmStatsEl, pbStatsEl, ilStatsEl].forEach((el) => (el.innerHTML = ""));
+    [mmRowsEl, pbRowsEl, ilRowsEl].forEach((el) => (el.textContent = ""));
+    [mmCounts, pbCounts, ilCounts].forEach((el) => (el.textContent = ""));
+  };
 
-  ilM2Btn?.addEventListener('click', async () => {
-    try {
-      const row = await getLatest('IL', ilM2Date.value.trim(), 'M2');
-      ilM2Preview.value = fmtLatest(row, true);
-    } catch (e) {
-      ilM2Preview.value = `Retrieve failed (IL_M2): ${String(e).slice(0, 180)}`;
-    }
-  });
+  const renderBatchList = (ol, list) => {
+    ol.innerHTML = "";
+    (list || []).forEach((line) => {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ol.appendChild(li);
+    });
+  };
 
-  // ---------- HISTORY (Load 20) ----------
-  async function loadHistory(game, startDate, limit = 20, tier = null) {
-    const p = new URLSearchParams({ game, from: startDate, limit: String(limit) });
-    if (tier) p.set('tier', tier);
-    const res = await fetch(`/store/get_history?${p.toString()}`);
-    const js = await asJSON(res);
-    if (!js.ok) throw new Error(js.detail || js.error || 'not ok');
-    // js.rows = [{iso:'MM/DD/YY', mains:[...], bonus:int|null}, ...]
-    // js.blob = text block already formatted (server did it)
-    return js;
-  }
+  const chips = (statsObj, order) => {
+    const frag = document.createDocumentFragment();
+    (order || Object.keys(statsObj || {})).forEach((k) => {
+      const v = statsObj?.[k] ?? 0;
+      const span = document.createElement("span");
+      span.className = "chip";
+      span.textContent = `${k}: ${v}`;
+      frag.appendChild(span);
+    });
+    return frag;
+  };
 
-  histMMLoad?.addEventListener('click', async () => {
-    try {
-      const js = await loadHistory('MM', histMMDate.value.trim(), 20);
-      histMMBlob.value = js.blob || (js.rows || []).map(r =>
-        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}  ${String(r.bonus ?? '').padStart(2, '0')}`
-      ).join('\n');
-    } catch (e) {
-      histMMBlob.value = `Load failed (MM): ${String(e).slice(0, 200)}`;
-    }
-  });
+  const rowsText = (rowsObj, order) => {
+    const parts = [];
+    (order || Object.keys(rowsObj || {})).forEach((k) => {
+      const arr = rowsObj?.[k] || [];
+      parts.push(`${k}: ${arr.join(", ") || "—"}`);
+    });
+    return parts.join("\n");
+  };
 
-  histPBLoad?.addEventListener('click', async () => {
-    try {
-      const js = await loadHistory('PB', histPBDate.value.trim(), 20);
-      histPBBlob.value = js.blob || (js.rows || []).map(r =>
-        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}  ${String(r.bonus ?? '').padStart(2, '0')}`
-      ).join('\n');
-    } catch (e) {
-      histPBBlob.value = `Load failed (PB): ${String(e).slice(0, 200)}`;
-    }
-  });
-
-  histILJPLoad?.addEventListener('click', async () => {
-    try {
-      const js = await loadHistory('IL', histILJPDate.value.trim(), 20, 'JP');
-      histILJPBlob.value = js.blob || (js.rows || []).map(r =>
-        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}`
-      ).join('\n');
-    } catch (e) {
-      histILJPBlob.value = `Load failed (IL_JP): ${String(e).slice(0, 200)}`;
-    }
-  });
-
-  histILM1Load?.addEventListener('click', async () => {
-    try {
-      const js = await loadHistory('IL', histILM1Date.value.trim(), 20, 'M1');
-      histILM1Blob.value = js.blob || (js.rows || []).map(r =>
-        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}`
-      ).join('\n');
-    } catch (e) {
-      histILM1Blob.value = `Load failed (IL_M1): ${String(e).slice(0, 200)}`;
-    }
-  });
-
-  histILM2Load?.addEventListener('click', async () => {
-    try {
-      const js = await loadHistory('IL', histILM2Date.value.trim(), 20, 'M2');
-      histILM2Blob.value = js.blob || (js.rows || []).map(r =>
-        `${r.iso}  ${r.mains.map(n => String(n).padStart(2, '0')).join('-')}`
-      ).join('\n');
-    } catch (e) {
-      histILM2Blob.value = `Load failed (IL_M2): ${String(e).slice(0, 200)}`;
-    }
-  });
-
-  // ---------- Phase 1 render cards ----------
-  function chip(label, value) {
-    return `<span class="chip">${label}: <b>${value}</b></span>`;
-  }
-  function renderBatch(list, isIL = false) {
-    return `<pre class="batch">${list.map((line, i) => `${String(i + 1).padStart(2, '0')}. ${line}`).join('\n')}</pre>`;
-  }
-  function renderRowsIdx(rows) {
-    const show = (k) => (rows[k] && rows[k].length ? rows[k].join(', ') : '—');
-    return `
-      <div class="rows">
-        <div>3: ${show('3')}</div>
-        <div>3+B: ${show('3+B')}</div>
-        <div>4: ${show('4')}</div>
-        <div>4+B: ${show('4+B')}</div>
-        <div>5: ${show('5')}</div>
-        <div>5+B: ${show('5+B')}</div>
-      </div>`;
-  }
-  function renderILRowsIdx(rows) {
-    const show = (k) => (rows[k] && rows[k].length ? rows[k].join(', ') : '—');
-    return `
-      <div class="rows">
-        <div>3: ${show('3')}</div>
-        <div>4: ${show('4')}</div>
-        <div>5: ${show('5')}</div>
-        <div>6: ${show('6')}</div>
-      </div>`;
-  }
-  function renderGameCard(title, batch, stats, rows, extra = '') {
-    const statsHtml = Object.entries(stats)
-      .map(([k, v]) => chip(k, v))
-      .join(' ');
-    const rowsHtml = title.startsWith('IL ')
-      ? renderILRowsIdx(rows)
-      : renderRowsIdx(rows);
-
-    return `
-      <div class="game-card">
-        <div class="game-title">${title}</div>
-        <div class="grid-2">
-          <div>${renderBatch(batch)}</div>
-          <div>
-            <div class="stats">${statsHtml}</div>
-            <div class="rows-title">Row indices</div>
-            ${rowsHtml}
-            ${extra}
-          </div>
-        </div>
-      </div>`;
-  }
-
-  function inflatePhase1Cards(payload) {
-    const e = payload.echo || {};
-    const html = [
-      renderGameCard(
-        'Mega Millions — 50 rows',
-        e.BATCH_MM || [],
-        (e.HITS_MM || {}).counts || { '3': 0, '3+B': 0, '4': 0, '4+B': 0, '5': 0, '5+B': 0 },
-        (e.HITS_MM || {}).rows || {}
-      ),
-      renderGameCard(
-        'Powerball — 50 rows',
-        e.BATCH_PB || [],
-        (e.HITS_PB || {}).counts || { '3': 0, '3+B': 0, '4': 0, '4+B': 0, '5': 0, '5+B': 0 },
-        (e.HITS_PB || {}).rows || {}
-      ),
-      renderGameCard(
-        'IL Lotto — 50 rows',
-        e.BATCH_IL || [],
-        (e.HITS_IL_M2 || e.HITS_IL_M1 || e.HITS_IL_JP || {}).counts || { '3': 0, '4': 0, '5': 0, '6': 0 },
-        (e.HITS_IL_M2 || e.HITS_IL_M1 || e.HITS_IL_JP || {}).rows || {},
-        `<div class="tiny-note">Counts shown are against your selected IL tier’s the 2nd newest draw.</div>`
-      )
-    ].join('');
-    cardsWrap.innerHTML = html;
-  }
+  const renderGame = (batchEl, statsEl, rowsEl, countsEl, batch, hits, order) => {
+    renderBatchList(batchEl, batch);
+    statsEl.innerHTML = "";
+    const counts = hits?.counts || {};
+    statsEl.appendChild(chips(counts, order));
+    rowsEl.textContent = rowsText(hits?.rows || {}, order);
+    // small total helper
+    const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
+    countsEl.textContent = total ? `hits total: ${total}` : "";
+  };
 
   // ---------- Run Phase 1 ----------
-  runBtn?.addEventListener('click', async () => {
-    cardsWrap.innerHTML = '';
-    resultRaw.value = '';
+  runPhase1?.addEventListener("click", async () => {
+    clearResults();
+    phase1Done.style.display = "none";
+    phase1Path.value = "";
+    setJSON(phase1Result, {});
 
+    // Build payload for backend
     const payload = {
-      phase: 'phase1',
-      run_id: (crypto.getRandomValues(new Uint32Array(1))[0] >>> 0).toString(36),
-
-      FEED_MM: feedMM.value.trim(),
-      FEED_PB: feedPB.value.trim(),
-      FEED_IL: feedIL.value.trim(),
-
-      HIST_MM_BLOB: histMMBlob.value.trim(),
-      HIST_PB_BLOB: histPBBlob.value.trim(),
-      HIST_IL_JP_BLOB: histILJPBlob.value.trim(),
-      HIST_IL_M1_BLOB: histILM1Blob.value.trim(),
-      HIST_IL_M2_BLOB: histILM2Blob.value.trim(),
-
+      phase: "phase1",
+      // latest 2nd-newest draws (strings)
       LATEST_MM: mmPreview.value.trim(),
       LATEST_PB: pbPreview.value.trim(),
       LATEST_IL_JP: ilJPPreview.value.trim(),
       LATEST_IL_M1: ilM1Preview.value.trim(),
-      LATEST_IL_M2: ilM2Preview.value.trim()
+      LATEST_IL_M2: ilM2Preview.value.trim(),
+
+      // feeds
+      FEED_MM: feedMM.value,
+      FEED_PB: feedPB.value,
+      FEED_IL: feedIL.value,
+
+      // histories (top-down, newest-first)
+      HIST_MM_BLOB: histMMBlob.value,
+      HIST_PB_BLOB: histPBBlob.value,
+      HIST_IL_JP_BLOB: histILJPBlob.value,
+      HIST_IL_M1_BLOB: histILM1Blob.value,
+      HIST_IL_M2_BLOB: histILM2Blob.value,
+
+      // force new randomness each click so batches differ
+      seed: Math.random().toString(36).slice(2),
     };
 
+    // quick front validation notes for most common “no output” cases
+    if (!payload.LATEST_MM || !payload.LATEST_PB) {
+      toast("Tip: retrieve MM and PB (left column) before running Phase 1.", "warn", 2600);
+    }
+    if (!payload.HIST_MM_BLOB || !payload.HIST_PB_BLOB) {
+      toast("Tip: load 20 rows for MM/PB history (right column).", "warn", 2600);
+    }
+
+    buttonBusy(runPhase1, true, "Running Phase 1…");
     try {
-      const res = await fetch('/run_json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const js = await asJSON(res);
-      pathBox.value = js.saved_path || '';
-      resultRaw.value = j(js); // keep raw debug
-      if (js.ok) inflatePhase1Cards(js);
+      const res = await postJSON("/run_json", payload);
+      setJSON(phase1Result, res);
+
+      if (!res?.ok) {
+        toast(res?.detail || res?.error || "Phase 1 failed", "error", 3200);
+        return;
+      }
+
+      // The backend echoes structured fields inside res.echo
+      const E = res.echo || {};
+
+      // Render MM
+      renderGame(
+        mmBatchEl,
+        mmStatsEl,
+        mmRowsEl,
+        mmCounts,
+        E.BATCH_MM || [],
+        E.HITS_MM || { counts: {}, rows: {} },
+        ["3", "3+B", "4", "4+B", "5", "5+B"]
+      );
+
+      // Render PB
+      renderGame(
+        pbBatchEl,
+        pbStatsEl,
+        pbRowsEl,
+        pbCounts,
+        E.BATCH_PB || [],
+        E.HITS_PB || { counts: {}, rows: {} },
+        ["3", "3+B", "4", "4+B", "5", "5+B"]
+      );
+
+      // Render IL (aggregate JP/M1/M2 with label chips)
+      // If your backend already aggregates into HITS_IL_* and BATCH_IL, we show those.
+      // BATCH_IL should be 50 rows of “A-B-C-D-E-F” style.
+      renderGame(
+        ilBatchEl,
+        ilStatsEl,
+        ilRowsEl,
+        ilCounts,
+        E.BATCH_IL || [],
+        {
+          counts: {
+            "JP 3:": E?.HITS_IL_JP?.counts?.["3"] || 0,
+            "JP 4:": E?.HITS_IL_JP?.counts?.["4"] || 0,
+            "JP 5:": E?.HITS_IL_JP?.counts?.["5"] || 0,
+            "JP 6:": E?.HITS_IL_JP?.counts?.["6"] || 0,
+            "M1 3:": E?.HITS_IL_M1?.counts?.["3"] || 0,
+            "M1 4:": E?.HITS_IL_M1?.counts?.["4"] || 0,
+            "M1 5:": E?.HITS_IL_M1?.counts?.["5"] || 0,
+            "M1 6:": E?.HITS_IL_M1?.counts?.["6"] || 0,
+            "M2 3:": E?.HITS_IL_M2?.counts?.["3"] || 0,
+            "M2 4:": E?.HITS_IL_M2?.counts?.["4"] || 0,
+            "M2 5:": E?.HITS_IL_M2?.counts?.["5"] || 0,
+            "M2 6:": E?.HITS_IL_M2?.counts?.["6"] || 0,
+          },
+          rows: {
+            "JP 3": (E?.HITS_IL_JP?.rows?.["3"] || []),
+            "JP 4": (E?.HITS_IL_JP?.rows?.["4"] || []),
+            "JP 5": (E?.HITS_IL_JP?.rows?.["5"] || []),
+            "JP 6": (E?.HITS_IL_JP?.rows?.["6"] || []),
+            "M1 3": (E?.HITS_IL_M1?.rows?.["3"] || []),
+            "M1 4": (E?.HITS_IL_M1?.rows?.["4"] || []),
+            "M1 5": (E?.HITS_IL_M1?.rows?.["5"] || []),
+            "M1 6": (E?.HITS_IL_M1?.rows?.["6"] || []),
+            "M2 3": (E?.HITS_IL_M2?.rows?.["3"] || []),
+            "M2 4": (E?.HITS_IL_M2?.rows?.["4"] || []),
+            "M2 5": (E?.HITS_IL_M2?.rows?.["5"] || []),
+            "M2 6": (E?.HITS_IL_M2?.rows?.["6"] || []),
+          },
+        },
+        [
+          "JP 3:", "JP 4:", "JP 5:", "JP 6:",
+          "M1 3:", "M1 4:", "M1 5:", "M1 6:",
+          "M2 3:", "M2 4:", "M2 5:", "M2 6:",
+        ]
+      );
+
+      // saved path & “Done” pill
+      phase1Path.value = res.saved_path || "";
+      phase1Done.style.display = "inline-block";
+      toast("Phase 1 complete.", "ok");
     } catch (e) {
-      resultRaw.value = String(e);
+      setJSON(phase1Result, { ok: false, error: String(e) });
+      toast(String(e), "error", 3600);
+    } finally {
+      buttonBusy(runPhase1, false);
     }
   });
 
-  // sensible defaults
-  if (mmDate) mmDate.value = '09/16/2025';
-  if (pbDate) pbDate.value = '09/17/2025';
-  if (ilJPDate) ilJPDate.value = '09/18/2025';
-  if (ilM1Date) ilM1Date.value = '09/18/2025';
-  if (ilM2Date) ilM2Date.value = '09/18/2025';
-  if (histMMDate) histMMDate.value = '09/12/2025';
-  if (histPBDate) histPBDate.value = '09/13/2025';
-  if (histILJPDate) histILJPDate.value = '09/15/2025';
-  if (histILM1Date) histILM1Date.value = '09/15/2025';
-  if (histILM2Date) histILM2Date.value = '09/15/2025';
+  // ---------- small cue on button press (visual) ----------
+  j(".btn").forEach((b) => {
+    b.addEventListener("mousedown", () => b.classList.add("pressed"));
+    ["mouseleave", "mouseup", "blur"].forEach((ev) =>
+      b.addEventListener(ev, () => b.classList.remove("pressed"))
+    );
+  });
 })();
