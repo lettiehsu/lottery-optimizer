@@ -1,23 +1,27 @@
 from __future__ import annotations
-import os, json, glob
+
+import os, glob, json
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template, send_from_directory
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# Optional modules
+# --------- modules ----------
 try:
     import lottery_store as store
     STORE_OK, STORE_ERR = True, None
 except Exception as e:
-    store, STORE_OK, STORE_ERR = None, False, f"{type(e).__name__}: {e}"
+    store = None
+    STORE_OK, STORE_ERR = False, f"{type(e).__name__}: {e}"
 
 try:
     import lottery_core as core
     CORE_OK, CORE_ERR = True, None
 except Exception as e:
-    core, CORE_OK, CORE_ERR = None, False, f"{type(e).__name__}: {e}"
+    core = None
+    CORE_OK, CORE_ERR = False, f"{type(e).__name__}: {e}"
 
+# --------- web ----------
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -26,9 +30,7 @@ def index():
 def static_files(filename: str):
     return send_from_directory(app.static_folder, filename)
 
-# =========================
-#   STORE: CSV & Lookups
-# =========================
+# --------- store API ----------
 @app.post("/store/import_csv")
 def store_import_csv():
     if not STORE_OK:
@@ -48,9 +50,9 @@ def store_import_csv():
 def store_get_by_date():
     if not STORE_OK:
         return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    game = request.args.get("game", "").strip().upper()
-    date = request.args.get("date", "").strip()
-    tier = request.args.get("tier", "").strip().upper()  # "", JP, M1, M2
+    game = (request.args.get("game") or "").strip().upper()
+    date = (request.args.get("date") or "").strip()
+    tier = (request.args.get("tier") or "").strip().upper() or None
     if not game or not date:
         return jsonify({"ok": False, "error": "missing_params"}), 400
     try:
@@ -65,10 +67,10 @@ def store_get_by_date():
 def store_get_history():
     if not STORE_OK:
         return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    game = request.args.get("game", "").strip().upper()
-    start = request.args.get("from", "").strip()  # MM/DD/YYYY
+    game = (request.args.get("game") or "").strip().upper()
+    start = (request.args.get("from") or "").strip()
+    tier = (request.args.get("tier") or "").strip().upper() or None
     limit = int(request.args.get("limit", "20"))
-    tier = request.args.get("tier", "").strip().upper()
     if not game or not start:
         return jsonify({"ok": False, "error": "missing_params"}), 400
     try:
@@ -77,19 +79,7 @@ def store_get_history():
     except Exception as e:
         return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
-# Debug helper (lets you see keys loaded)
-@app.get("/store/debug_keys")
-def store_debug_keys():
-    if not STORE_OK:
-        return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    try:
-        return jsonify({"ok": True, "keys": store.list_keys()})
-    except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
-
-# =========================
-#   Phase APIs (to core)
-# =========================
+# --------- core API ----------
 @app.post("/run_json")
 def run_json():
     if not CORE_OK or not hasattr(core, "handle_run"):
@@ -101,17 +91,6 @@ def run_json():
     except Exception as e:
         return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
-@app.post("/confirm_json")
-def confirm_json():
-    if not CORE_OK or not hasattr(core, "handle_confirm"):
-        return jsonify({"ok": False, "error": "core_not_loaded", "detail": (CORE_ERR if not CORE_OK else "handle_confirm missing")}), 500
-    payload = request.get_json(silent=True) or dict(request.form)
-    try:
-        res = core.handle_confirm(payload)
-        return jsonify(res)
-    except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
-
 @app.get("/recent")
 def recent():
     if CORE_OK and hasattr(core, "recent_files"):
@@ -119,7 +98,7 @@ def recent():
             return jsonify({"ok": True, "files": core.recent_files()})
         except Exception as e:
             return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
-    files = sorted(glob.glob("/tmp/lotto_phase*.json"))[-20:]
+    files = sorted(glob.glob("/tmp/lotto_*.json"))[-20:]
     return jsonify({"ok": True, "files": files})
 
 @app.get("/health")
@@ -133,4 +112,4 @@ def health():
     })
 
 if __name__ == "__main__":
-    app.run("0.0.0.0", int(os.environ.get("PORT", "5000")), debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT","5000")), debug=True)
