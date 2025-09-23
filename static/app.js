@@ -98,6 +98,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // Run Phase 1
   qs("runPhase1")?.addEventListener("click", async () => {
     const body = {
+      phase: "phase1",  // <<< IMPORTANT: tell backend this is Phase 1
       LATEST_MM: qs("mmLatest").textContent.trim(),
       LATEST_PB: qs("pbLatest").textContent.trim(),
       LATEST_IL_JP: qs("ilJpLatest").textContent.trim(),
