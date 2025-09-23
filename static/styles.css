@@ -1,45 +1,59 @@
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #111; }
-h1 { margin-bottom: 12px; }
-.card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 18px 0; background: #fff; }
-.row { display: flex; gap: 8px; align-items: center; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-textarea, input[type=text] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
-button { padding: 8px 12px; border-radius: 8px; border: 1px solid #bbb; background: #f7f7f7; cursor: pointer; }
-button.primary { background: #2563eb; border-color: #1d4ed8; color: #fff; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.small { font-size: 12px; }
-.muted { color: #666; }
-.mt { margin-top: 12px; }
-.log { white-space: pre-wrap; padding: 8px; border-radius: 8px; border: 1px dashed #ccc; margin-top: 8px; }
-.log.ok { background: #f3f9ff; border-color: #b6ddff; }
-.log.err { background: #fff5f5; border-color: #ffb3b3; }
-/* --- Button click feedback & busy state --- */
-.btn { transition: transform .04s ease, opacity .2s ease; }
-.btn.pressed { transform: translateY(1px) scale(.99); }
-.btn.busy { opacity: .65; pointer-events: none; }
-
-/* If some buttons don't use .btn, this makes all buttons inherit the same feel */
-button.pressed { transform: translateY(1px) scale(.99); }
-button.busy { opacity: .65; pointer-events: none; }
-
-/* --- Toasts (small pop-up messages) --- */
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%) translateY(10px);
-  background: #1f2937; /* dark slate */
-  color: #fff;
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 13px;
-  opacity: 0;
-  box-shadow: 0 6px 18px rgba(0,0,0,.18);
-  transition: transform .2s ease, opacity .2s ease;
-  z-index: 9999;
+:root{
+  --bg:#f8fafc;
+  --card:#ffffff;
+  --text:#0f172a;
+  --muted:#64748b;
+  --line:#e2e8f0;
+  --primary:#2563eb;
+  --primary-600:#1d4ed8;
+  --ok:#16a34a;
+  --warn:#f59e0b;
+  --err:#dc2626;
 }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast-ok { background: #0b7d35; }
-.toast-warn { background: #9a6b00; }
-.toast-error { background: #b3261e; }
+*{box-sizing:border-box}
+body{font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:20px; color:var(--text); background:var(--bg);}
+h1{margin:0 0 12px;}
+.row{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+.inline{display:flex; align-items:center; gap:8px}
+.right{margin-left:auto}
+.small{font-size:12px}
+.tiny{font-size:12px}
+.muted{color:var(--muted)}
+.mt{margin-top:12px}
+
+.card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:12px 0;}
+.card.subtle{background:#fff;}
+.grid{display:grid; gap:16px}
+.grid-2{grid-template-columns:1fr 1fr}
+.grid-3{grid-template-columns:1fr 1fr 1fr}
+.grid .compact .row{margin-bottom:6px}
+
+textarea, input[type=text]{width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text);}
+textarea.mono, .mono{font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+
+.btn{padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:#f1f5f9; cursor:pointer}
+.btn.primary{background:var(--primary); color:#fff; border-color:var(--primary-600)}
+.btn.busy{opacity:0.7; cursor:wait}
+.pressed{transform:translateY(1px);}
+
+.pill{background:#efeff6; color:#334155; border:1px solid var(--line); padding:3px 8px; border-radius:999px; font-size:12px}
+.pill.success{background:#ecfdf5; color:#065f46; border-color:#a7f3d0}
+
+.log{white-space:pre-wrap; border:1px dashed var(--line); border-radius:8px; padding:8px; margin-top:8px; font-size:12px}
+.log.ok{background:#f0f9ff; border-color:#bae6fd}
+.log.err{background:#fff1f2; border-color:#fecdd3}
+
+.batch{max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:8px 12px; background:#fff; margin:6px 0}
+.statline{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px}
+.chip{background:#eef2ff; border:1px solid #c7d2fe; color:#1e3a8a; padding:2px 6px; border-radius:999px; font-size:12px}
+
+.toast{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:8px 12px; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.2)}
+.toast.ok{background:#065f46}
+.toast.warn{background:#92400e}
+.toast.error{background:#7f1d1d}
+
+.two-col{display:grid; grid-template-columns:1.4fr 1fr; gap:12px}
+@media (max-width:1100px){
+  .grid-3{grid-template-columns:1fr}
+  .two-col{grid-template-columns:1fr}
+}
