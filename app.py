@@ -1,44 +1,34 @@
 from __future__ import annotations
-
-import os
+import os, json, glob
+from datetime import datetime
 from flask import Flask, request, jsonify, render_template, send_from_directory
 
-# Flask
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# lottery_store for CSV + history
+# Optional modules
 try:
     import lottery_store as store
-    STORE_OK = True
-    STORE_ERR = None
+    STORE_OK, STORE_ERR = True, None
 except Exception as e:
-    store = None
-    STORE_OK = False
-    STORE_ERR = f"{type(e).__name__}: {e}"
+    store, STORE_OK, STORE_ERR = None, False, f"{type(e).__name__}: {e}"
 
-# lottery_core (optional – if you have it already wired)
 try:
     import lottery_core as core
-    CORE_OK = True
-    CORE_ERR = None
+    CORE_OK, CORE_ERR = True, None
 except Exception as e:
-    core = None
-    CORE_OK = False
-    CORE_ERR = f"{type(e).__name__}: {e}"
-
+    core, CORE_OK, CORE_ERR = None, False, f"{type(e).__name__}: {e}"
 
 @app.get("/")
 def index():
     return render_template("index.html")
 
-
 @app.get("/static/<path:filename>")
 def static_files(filename: str):
     return send_from_directory(app.static_folder, filename)
 
-
-# --------------- CSV / HISTORY ----------------
-
+# =========================
+#   STORE: CSV & Lookups
+# =========================
 @app.post("/store/import_csv")
 def store_import_csv():
     if not STORE_OK:
@@ -46,61 +36,101 @@ def store_import_csv():
     f = request.files.get("file")
     if not f:
         return jsonify({"ok": False, "error": "no_file"}), 400
-    overwrite = (request.form.get("overwrite", "false").lower() in ("1","true","yes","on"))
+    overwrite = request.form.get("overwrite", "false").lower() in ("1","true","yes","on")
     text = f.read().decode("utf-8", errors="replace")
     try:
         stats = store.import_csv(text, overwrite=overwrite)
-        return jsonify(stats)
+        return jsonify({"ok": True, **stats})
     except Exception as e:
         return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
-
 
 @app.get("/store/get_by_date")
 def store_get_by_date():
     if not STORE_OK:
         return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    game = (request.args.get("game") or "").strip()
-    date = (request.args.get("date") or "").strip()
+    game = request.args.get("game", "").strip().upper()
+    date = request.args.get("date", "").strip()
+    tier = request.args.get("tier", "").strip().upper()  # "", JP, M1, M2
     if not game or not date:
         return jsonify({"ok": False, "error": "missing_params"}), 400
     try:
-        row = store.get_by_date(game, date)
+        row = store.get_by_date(game, date, tier=tier)
         if not row:
             return jsonify({"ok": False, "error": "not_found"}), 404
         return jsonify({"ok": True, "row": row})
     except Exception as e:
         return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
-
 @app.get("/store/get_history")
 def store_get_history():
     if not STORE_OK:
         return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    game = (request.args.get("game") or "").strip()
-    start = (request.args.get("from") or "").strip()
+    game = request.args.get("game", "").strip().upper()
+    start = request.args.get("from", "").strip()  # MM/DD/YYYY
     limit = int(request.args.get("limit", "20"))
+    tier = request.args.get("tier", "").strip().upper()
     if not game or not start:
         return jsonify({"ok": False, "error": "missing_params"}), 400
     try:
-        res = store.get_history(game, start_date=start, limit=limit)
+        hist = store.get_history(game, start_date=start, limit=limit, tier=tier)
+        return jsonify({"ok": True, **hist})
+    except Exception as e:
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+
+# Debug helper (lets you see keys loaded)
+@app.get("/store/debug_keys")
+def store_debug_keys():
+    if not STORE_OK:
+        return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
+    try:
+        return jsonify({"ok": True, "keys": store.list_keys()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+
+# =========================
+#   Phase APIs (to core)
+# =========================
+@app.post("/run_json")
+def run_json():
+    if not CORE_OK or not hasattr(core, "handle_run"):
+        return jsonify({"ok": False, "error": "core_not_loaded", "detail": (CORE_ERR if not CORE_OK else "handle_run missing")}), 500
+    payload = request.get_json(silent=True) or dict(request.form)
+    try:
+        res = core.handle_run(payload)
         return jsonify(res)
     except Exception as e:
         return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
+@app.post("/confirm_json")
+def confirm_json():
+    if not CORE_OK or not hasattr(core, "handle_confirm"):
+        return jsonify({"ok": False, "error": "core_not_loaded", "detail": (CORE_ERR if not CORE_OK else "handle_confirm missing")}), 500
+    payload = request.get_json(silent=True) or dict(request.form)
+    try:
+        res = core.handle_confirm(payload)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
 
-# --------------- HEALTH ----------------
+@app.get("/recent")
+def recent():
+    if CORE_OK and hasattr(core, "recent_files"):
+        try:
+            return jsonify({"ok": True, "files": core.recent_files()})
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+    files = sorted(glob.glob("/tmp/lotto_phase*.json"))[-20:]
+    return jsonify({"ok": True, "files": files})
 
 @app.get("/health")
 def health():
     return jsonify({
         "ok": True,
-        "store_loaded": STORE_OK,
-        "store_err": STORE_ERR,
         "core_loaded": CORE_OK,
-        "core_err": CORE_ERR,
+        "core_err": None if CORE_OK else CORE_ERR,
+        "store_loaded": STORE_OK,
+        "store_err": None if STORE_OK else STORE_ERR
     })
 
-
-# Only used for local debug; Render uses gunicorn
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+    app.run("0.0.0.0", int(os.environ.get("PORT", "5000")), debug=True)
