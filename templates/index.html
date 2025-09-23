@@ -2,270 +2,118 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Lottery Optimizer</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root{
-      --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --sub:#475569;
-      --line:#e5e7eb; --accent:#111827; --ok:#10b981; --bad:#ef4444;
-    }
-    *{ box-sizing:border-box }
-    html,body{ height:100% }
-    body{ margin:0; font-family:Inter,system-ui,Segoe UI,Arial; color:var(--ink); background:var(--bg) }
-    .wrap{ max-width:1160px; margin:0 auto; padding:18px }
-    h1{ margin:0 0 10px 0; font-size:22px }
-    h2{ margin:16px 0 8px 0; font-size:18px }
-    .row{ display:grid; gap:12px }
-    .row.cols-2{ grid-template-columns: 1fr 1fr }
-    .row.cols-3{ grid-template-columns: repeat(3,1fr) }
-    .card{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px }
-    .pill{ display:inline-block; padding:4px 8px; border:1px solid var(--line); border-radius:999px; font-size:12px; background:#fff }
-    label{ font-size:12px; color:var(--sub); display:block; margin-bottom:6px }
-    input[type="text"], textarea, select{
-      width:100%; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink);
-    }
-    textarea{ min-height:112px; white-space:pre; }
-    .btn{ padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer }
-    .btn.primary{ background:var(--accent); color:#fff; border-color:#0b0f19 }
-    .tiny{ font-size:12px; color:var(--sub) }
-    .mt{ margin-top:12px } .mt-lg{ margin-top:18px } .mt-xl{ margin-top:28px }
-    .flex{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-    .w-120{ width:120px }
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace }
-    .badge{ display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); background:#fff }
-    .badge.ok{ background:#ecfdf5; border-color:var(--ok); color:#065f46 }
-    .badge.no{ background:#fef2f2; border-color:var(--bad); color:#7f1d1d }
-    .result-light{ background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:14px }
-    .result-grid{ display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)) }
-    .result-title{ font-weight:600; margin-bottom:6px }
-    .result-pre{ background:#ffffff;border:1px solid var(--line);border-radius:8px;padding:10px;margin:0;min-height:60px;white-space:pre }
-    .result-pre.raw{ max-height:260px; overflow:auto }
-  </style>
+  <link rel="stylesheet" href="/static/styles.css"/>
 </head>
-<body>
-  <div class="wrap">
+<body class="light">
+  <div class="container">
     <h1>Lottery Optimizer</h1>
 
-    <!-- CSV upload -->
-    <div class="card">
-      <div class="flex">
-        <input id="importCsvFile" type="file"/>
-        <label class="flex" style="gap:6px;">
-          <input id="overwriteChk" type="checkbox" checked/>
-          <span class="tiny">Overwrite existing data</span>
-        </label>
-        <button id="importCsvBtn" class="btn">Import CSV</button>
-      </div>
-      <pre id="importResult" class="mono mt" style="min-height:60px">—</pre>
-    </div>
+    <!-- Upload -->
+    <section class="card">
+      <h2>Bulk import history (CSV)</h2>
+      <form id="csvForm" action="/store/import_csv" method="post" enctype="multipart/form-data">
+        <div class="row" style="gap:12px;align-items:center;">
+          <input id="csvFile" type="file" name="file" accept=".csv,text/csv"/>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input id="csvOverwrite" type="checkbox" name="overwrite"/> Overwrite existing data
+          </label>
+          <button class="btn" type="submit">Import CSV</button>
+        </div>
+      </form>
+      <pre id="csvResult" class="mono"></pre>
+    </section>
 
     <!-- Phase 1 -->
-    <h2 class="mt-lg">Phase 1 — Evaluation</h2>
+    <section class="card">
+      <h2>Phase 1 — Evaluation</h2>
+      <h3>The 2nd Newest jackpots — with per-game dates</h3>
 
-    <div class="row cols-2">
-      <!-- Left: MM/PB -->
-      <div class="card">
-        <div class="pill">The 2nd Newest jackpots — with per-game dates</div>
+      <div class="grid3">
+        <div>
+          <label>Mega Millions date</label>
+          <input id="mmDate" type="date"/>
+          <button class="btn" id="mmRetrieve">Retrieve</button>
+          <pre id="mmLatest" class="mono"></pre>
+        </div>
+        <div>
+          <label>Powerball date</label>
+          <input id="pbDate" type="date"/>
+          <button class="btn" id="pbRetrieve">Retrieve</button>
+          <pre id="pbLatest" class="mono"></pre>
+        </div>
+        <div>
+          <label>IL Lotto — Jackpot date</label>
+          <input id="ilJpDate" type="date"/>
+          <button class="btn" id="ilJpRetrieve">Retrieve</button>
+          <pre id="ilJpLatest" class="mono"></pre>
+        </div>
+      </div>
 
-        <div class="mt">
-          <label>Mega Millions date (MM/DD/YYYY)</label>
-          <div class="flex">
-            <input id="mm_date" type="text" placeholder="MM/DD/YYYY" class="w-120"/>
-            <button id="btnMM" class="btn">Retrieve</button>
+      <div class="grid2" style="margin-top:10px;">
+        <div>
+          <label>IL Lotto — M1 date</label>
+          <input id="ilM1Date" type="date"/>
+          <button class="btn" id="ilM1Retrieve">Retrieve</button>
+          <pre id="ilM1Latest" class="mono"></pre>
+        </div>
+        <div>
+          <label>IL Lotto — M2 date</label>
+          <input id="ilM2Date" type="date"/>
+          <button class="btn" id="ilM2Retrieve">Retrieve</button>
+          <pre id="ilM2Latest" class="mono"></pre>
+        </div>
+      </div>
+
+      <h3 style="margin-top:14px;">Feeds (Lottery Defeated)</h3>
+      <div class="grid3">
+        <textarea id="FEED_MM" class="mono" placeholder="FEED_MM"></textarea>
+        <textarea id="FEED_PB" class="mono" placeholder="FEED_PB"></textarea>
+        <textarea id="FEED_IL" class="mono" placeholder="FEED_IL"></textarea>
+      </div>
+
+      <h3 style="margin-top:14px;">History blocks — choose the 3rd newest date, then “Load 20”</h3>
+      <div class="grid3">
+        <div>
+          <label>HIST_MM_BLOB start date</label>
+          <input id="histMmFrom" type="date"/>
+          <button class="btn" id="histMmLoad">Load 20</button>
+          <pre id="HIST_MM_BLOB" class="mono tall"></pre>
+        </div>
+        <div>
+          <label>HIST_PB_BLOB start date</label>
+          <input id="histPbFrom" type="date"/>
+          <button class="btn" id="histPbLoad">Load 20</button>
+          <pre id="HIST_PB_BLOB" class="mono tall"></pre>
+        </div>
+        <div>
+          <label>HIST_IL_BLOB (JP / M1 / M2) — set each date, then “Load 20”</label>
+          <div class="row" style="gap:6px;margin-bottom:6px;">
+            <input id="histIlJpFrom" type="date" title="IL JP start date"/>
+            <button class="btn xs" id="histIlJpLoad">Load JP</button>
+            <input id="histIlM1From" type="date" title="IL M1 start date"/>
+            <button class="btn xs" id="histIlM1Load">Load M1</button>
+            <input id="histIlM2From" type="date" title="IL M2 start date"/>
+            <button class="btn xs" id="histIlM2Load">Load M2</button>
           </div>
-          <input id="mm_preview" type="text" class="mt" placeholder="[[mains..], bonus]" />
-        </div>
-
-        <div class="mt">
-          <label>Powerball date (MM/DD/YYYY)</label>
-          <div class="flex">
-            <input id="pb_date" type="text" placeholder="MM/DD/YYYY" class="w-120"/>
-            <button id="btnPB" class="btn">Retrieve</button>
-          </div>
-          <input id="pb_preview" type="text" class="mt" placeholder="[[mains..], bonus]" />
+          <pre id="HIST_IL_JP_BLOB" class="mono"></pre>
+          <pre id="HIST_IL_M1_BLOB" class="mono"></pre>
+          <pre id="HIST_IL_M2_BLOB" class="mono"></pre>
         </div>
       </div>
 
-      <!-- Right: IL per-tier -->
-      <div class="card">
-        <div class="pill">IL Lotto — select dates then “Retrieve” (bonus is null)</div>
-
-        <div class="mt">
-          <label>Jackpot date</label>
-          <div class="flex">
-            <input id="il_jp_date" type="text" placeholder="MM/DD/YYYY" class="w-120"/>
-            <button id="btnILJP" class="btn">Retrieve</button>
-          </div>
-          <input id="il_jp_preview" type="text" class="mt" placeholder="[[mains..], null]" />
-        </div>
-
-        <div class="mt">
-          <label>Million 1 date</label>
-          <div class="flex">
-            <input id="il_m1_date" type="text" placeholder="MM/DD/YYYY" class="w-120"/>
-            <button id="btnILM1" class="btn">Retrieve</button>
-          </div>
-          <input id="il_m1_preview" type="text" class="mt" placeholder="[[mains..], null]" />
-        </div>
-
-        <div class="mt">
-          <label>Million 2 date</label>
-          <div class="flex">
-            <input id="il_m2_date" type="text" placeholder="MM/DD/YYYY" class="w-120"/>
-            <button id="btnILM2" class="btn">Retrieve</button>
-          </div>
-          <input id="il_m2_preview" type="text" class="mt" placeholder="[[mains..], null]" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Feeds -->
-    <div class="row cols-3 mt">
-      <div class="card">
-        <div class="pill">FEED_MM</div>
-        <textarea id="feed_mm" placeholder="Paste latest MM feed..."></textarea>
-      </div>
-      <div class="card">
-        <div class="pill">FEED_PB</div>
-        <textarea id="feed_pb" placeholder="Paste latest PB feed..."></textarea>
-      </div>
-      <div class="card">
-        <div class="pill">FEED_IL</div>
-        <textarea id="feed_il" placeholder="Paste latest IL feed..."></textarea>
-      </div>
-    </div>
-
-    <!-- History blobs (with the requested “Load 20” buttons) -->
-    <div class="row cols-3 mt">
-      <!-- MM -->
-      <div class="card">
-        <div class="flex">
-          <div class="pill">History blobs — MM</div>
-          <div style="flex:1"></div>
-          <input id="hist_mm_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button id="btnLoadMM20" class="btn">Load 20</button>
-        </div>
-        <div class="tiny mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  MB</span></div>
-        <textarea id="hist_mm_blob" class="mono mt" placeholder=""></textarea>
-      </div>
-
-      <!-- PB -->
-      <div class="card">
-        <div class="flex">
-          <div class="pill">History blobs — PB</div>
-          <div style="flex:1"></div>
-          <input id="hist_pb_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button id="btnLoadPB20" class="btn">Load 20</button>
-        </div>
-        <div class="tiny mt">Format: <span class="mono">mm-dd-yy  n1-n2-n3-n4-n5  PB</span></div>
-        <textarea id="hist_pb_blob" class="mono mt" placeholder=""></textarea>
-      </div>
-
-      <!-- IL (JP/M1/M2) -->
-      <div class="card">
-        <div class="pill">HIST_IL_BLOB (JP / M1 / M2) — use the 3rd-newest date then “Load 20”.</div>
-
-        <div class="flex mt">
-          <label class="inline tiny" style="width:20px">JP</label>
-          <input id="hist_il_jp_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button id="btnLoadILJP20" class="btn">Load 20</button>
-        </div>
-        <textarea id="hist_il_jp_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
-
-        <div class="flex mt">
-          <label class="inline tiny" style="width:20px">M1</label>
-          <input id="hist_il_m1_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button id="btnLoadILM120" class="btn">Load 20</button>
-        </div>
-        <textarea id="hist_il_m1_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
-
-        <div class="flex mt">
-          <label class="inline tiny" style="width:20px">M2</label>
-          <input id="hist_il_m2_from" type="text" class="w-120" placeholder="MM/DD/YYYY"/>
-          <button id="btnLoadILM220" class="btn">Load 20</button>
-        </div>
-        <textarea id="hist_il_m2_blob" class="mono mt" placeholder="mm-dd-yy  A-B-C-D-E-F"></textarea>
-      </div>
-    </div>
-
-    <!-- RUN PHASE 1 -->
-    <div class="row mt-lg">
-      <div class="card" style="display:flex; gap:10px; align-items:center;">
+      <div class="row" style="margin-top:14px;">
         <button id="runPhase1" class="btn primary">Run Phase 1</button>
-        <span class="tiny">Saved path:</span>
-        <input id="phase1Path" type="text" readonly class="mono" style="flex:1"/>
-      </div>
-    </div>
-
-    <!-- Phase 1 — Results + Stats -->
-    <h2 class="mt">Phase 1 — Results</h2>
-    <div class="result-light">
-      <div class="result-grid">
-        <div>
-          <div class="result-title">Mega Millions — NJ line</div>
-          <pre id="p1_mm_line" class="result-pre">—</pre>
-          <div class="tiny">Batch: <span id="p1_mm_batch">—</span> • Position: <span id="p1_mm_pos">—</span></div>
-          <div class="mt"><span id="p1_mm_exact" class="badge">Exact: —</span></div>
-          <div class="mt"><div class="tiny">Stats (3, 3+MB, 4, 4+MB, 5, 5+MB)</div><pre id="p1_mm_stats" class="result-pre">—</pre></div>
-        </div>
-        <div>
-          <div class="result-title">Powerball — NJ line</div>
-          <pre id="p1_pb_line" class="result-pre">—</pre>
-          <div class="tiny">Batch: <span id="p1_pb_batch">—</span> • Position: <span id="p1_pb_pos">—</span></div>
-          <div class="mt"><span id="p1_pb_exact" class="badge">Exact: —</span></div>
-          <div class="mt"><div class="tiny">Stats (3, 3+PB, 4, 4+PB, 5, 5+PB)</div><pre id="p1_pb_stats" class="result-pre">—</pre></div>
-        </div>
-        <div>
-          <div class="result-title">IL Lotto — NJ lines (JP / M1 / M2)</div>
-          <pre id="p1_il_lines" class="result-pre">—</pre>
-          <div class="tiny">Batch JP/M1/M2: <span id="p1_il_batch">—</span> • Position JP/M1/M2: <span id="p1_il_pos">—</span></div>
-          <div class="mt"><span id="p1_il_exact" class="badge">All three exact: —</span></div>
-          <div class="mt"><div class="tiny">Stats (3/4/5/6 hits, no bonus)</div><pre id="p1_il_stats" class="result-pre">—</pre></div>
-        </div>
+        <span class="tiny" style="margin-left:8px;">Saved path:</span>
+        <input id="phase1Path" type="text" readonly/>
       </div>
 
-      <details class="mt">
-        <summary>Raw Phase-1 JSON (debug)</summary>
-        <pre id="phase1-result-json" class="result-pre raw">—</pre>
-      </details>
-    </div>
-
-    <!-- Phase 2 placeholder -->
-    <h2 class="mt-xl">Phase 2 — Prediction</h2>
-    <div class="row cols-3">
-      <div class="card">
-        <div class="pill">Inputs</div>
-        <label class="mt">Game
-          <select id="p2_game">
-            <option value="MM">Mega Millions</option>
-            <option value="PB">Powerball</option>
-            <option value="IL">IL Lotto</option>
-          </select>
-        </label>
-        <label class="mt">Draw date
-          <input id="p2_date" type="text" placeholder="MM/DD/YYYY"/>
-        </label>
-        <label class="mt">Top-N hot to include
-          <input id="p2_hot_n" type="number" value="8" min="0" max="20"/>
-        </label>
-        <label class="mt">Top-N overdue to include
-          <input id="p2_overdue_n" type="number" value="8" min="0" max="20"/>
-        </label>
-        <button id="btn_run_p2" class="btn primary mt">Run Phase 2</button>
+      <div class="card" style="margin-top:10px;">
+        <div class="pill">Phase 1 — Results</div>
+        <pre id="phase1Result" class="mono tall"></pre>
       </div>
-      <div class="card">
-        <div class="pill">Suggested Bands / Picks</div>
-        <pre id="p2_output" class="result-pre">—</pre>
-      </div>
-      <div class="card">
-        <div class="pill">Notes</div>
-        <pre class="result-pre">• Phase 2 uses FEED_* and HIST_* already loaded.
-• Connect this UI to your backend route when ready.</pre>
-      </div>
-    </div>
+    </section>
   </div>
 
   <script src="/static/app.js"></script>
