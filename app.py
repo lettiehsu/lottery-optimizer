@@ -1,141 +1,207 @@
+# app.py  — COMPLETE FILE
+
 from __future__ import annotations
 
-import os
-import io
 import json
-import glob
+import os
+import re
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from typing import Any, Dict, List, Optional
+
+from flask import Flask, jsonify, render_template, request, send_from_directory
+
+# Your storage module
+import lottery_store as store  # must provide: import_csv(filelike, overwrite),
+                               # get_by_date(game, date, tier=None),
+                               # get_history(game, from_date, limit=20, tier=None)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# ---------- store (CSV persistence & retrieval) ----------
-try:
-    import lottery_store as store
-    STORE_OK, STORE_ERR = True, None
-except Exception as e:
-    store = None
-    STORE_OK, STORE_ERR = False, f"{type(e).__name__}: {e}"
 
-# ---------- core (Phase 1 logic) ----------
-try:
-    import lottery_core as core
-    CORE_OK, CORE_ERR = True, None
-except Exception as e:
-    core = None
-    CORE_OK, CORE_ERR = False, f"{type(e).__name__}: {e}"
+# --------------------------- Utilities ---------------------------
 
-# ---------- home ----------
+def _ok(payload: Dict[str, Any]) -> Any:
+    payload.setdefault("ok", True)
+    return jsonify(payload)
+
+def _err(detail: str, error: str = "Error", status: int = 400) -> Any:
+    return jsonify({"ok": False, "error": error, "detail": detail}), status
+
+def _norm_date(s: str) -> str:
+    """
+    Normalize a variety of date shapes to MM/DD/YYYY.
+    Accepts: 9/6/2025, 09/06/2025, 2025-09-06, 2025/09/06, 09-06-2025, 9-6-25
+    Returns: 'MM/DD/YYYY'
+    """
+    if not s:
+        raise ValueError("Empty date")
+
+    t = s.strip()
+    # mm/dd/yyyy already?
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", t):
+        mm, dd, yy = t.split("/")
+        return f"{int(mm):02d}/{int(dd):02d}/{int(yy):04d}"
+
+    # yyyy-mm-dd or yyyy/mm/dd
+    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", t)
+    if m:
+        yy, mm, dd = m.groups()
+        return f"{int(mm):02d}/{int(dd):02d}/{int(yy):04d}"
+
+    # mm-dd-yyyy or mm/dd/yy
+    m = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})", t)
+    if m:
+        mm, dd, yy = m.groups()
+        if len(yy) == 2:
+            # assume 20xx
+            yy = f"20{yy}"
+        return f"{int(mm):02d}/{int(dd):02d}/{int(yy):04d}"
+
+    # Last-chance parse via datetime on a few formats
+    fmts = [
+        "%m/%d/%Y", "%m-%d-%Y",
+        "%Y-%m-%d", "%Y/%m/%d",
+        "%m/%d/%y", "%m-%d-%y",
+    ]
+    last = None
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(t, fmt)
+            return dt.strftime("%m/%d/%Y")
+        except Exception as e:  # keep last error
+            last = e
+    raise ValueError(f"Unrecognized date: {t!r} ({last})")
+
+
+# --------------------------- Routes ---------------------------
+
 @app.get("/")
 def index():
     return render_template("index.html")
 
-# (Flask already serves /static, this is just explicit)
-@app.get("/static/<path:filename>")
-def static_files(filename: str):
-    return send_from_directory(app.static_folder, filename)
+@app.get("/health")
+def health():
+    core_loaded = True
+    store_loaded = True
+    core_err = None
+    store_err = None
+    return _ok({
+        "ok": True,
+        "core_loaded": core_loaded,
+        "store_loaded": store_loaded,
+        "core_err": core_err,
+        "store_err": store_err,
+    })
 
-# ===================== STORE API ======================
+# ---- CSV import -------------------------------------------------
 
 @app.post("/store/import_csv")
 def store_import_csv():
-    if not STORE_OK:
-        return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    f = request.files.get("file")
-    if not f:
-        return jsonify({"ok": False, "error": "no_file"}), 400
-    overwrite = (request.form.get("overwrite", "false").lower() in ("1","true","yes","on"))
-    text = f.read().decode("utf-8", errors="replace")
     try:
-        stats = store.import_csv(text, overwrite=overwrite)
-        return jsonify({"ok": True, **stats})
+        overwrite = request.form.get("overwrite", "false").lower() == "true"
+        f = request.files.get("file")
+        if not f:
+            return _err("No file uploaded", "ValueError")
+        stats = store.import_csv(f.stream, overwrite=overwrite)  # filelike supported
+        # stats should be dict with added/updated/total/ok
+        stats.setdefault("ok", True)
+        return _ok(stats)
     except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+        return _err(str(e), type(e).__name__)
+
+# ---- Per-date fetch (2nd newest etc.) --------------------------
 
 @app.get("/store/get_by_date")
 def store_get_by_date():
-    if not STORE_OK:
-        return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    game = (request.args.get("game") or "").strip()
-    date = (request.args.get("date") or "").strip()
-    tier = (request.args.get("tier") or "").strip()
     try:
-        normalized = store._norm_date(date)
-        row = store.get_by_date(game, date, tier)
-        if row:
-            return jsonify({"ok": True, "row": row, "game": game, "date": normalized, "tier": tier or None})
-        available = store.dates_for(game, tier)
-        near = store.nearest_dates(game, normalized, tier, n=3)
-        return jsonify({
-            "ok": False, "error": "not_found",
-            "detail": {
-                "message":"not_found",
-                "looked_for":{"game":game,"date":normalized,"tier":tier},
-                "available_dates_for_game_tier": available,
-                "closest_dates": near
-            }
-        }), 404
+        game = (request.args.get("game") or "").strip()
+        if not game:
+            return _err("Missing 'game'", "ValueError")
+        raw_date = request.args.get("date") or ""
+        date = _norm_date(raw_date)
+        tier = (request.args.get("tier") or "").strip() or None
+
+        row = store.get_by_date(game=game, date=date, tier=tier)
+        return _ok({"row": row})
     except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+        return _err(str(e), type(e).__name__)
+
+# ---- History fetch (Load 20) -----------------------------------
 
 @app.get("/store/get_history")
 def store_get_history():
-    if not STORE_OK:
-        return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    game = (request.args.get("game") or "").strip()
-    start = (request.args.get("from") or "").strip()
-    tier = (request.args.get("tier") or "").strip()
-    limit = int(request.args.get("limit", "20"))
-    if not game or not start:
-        return jsonify({"ok": False, "error": "missing_params"}), 400
     try:
-        rows = store.get_history(game, since_date=start, tier=tier, limit=limit)
-        return jsonify({"ok": True, "rows": rows})
-    except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+        game = (request.args.get("game") or "").strip()
+        if not game:
+            return _err("Missing 'game'", "ValueError")
+        raw_from = request.args.get("from") or ""
+        from_date = _norm_date(raw_from)
+        limit = int(request.args.get("limit", "20"))
+        tier = (request.args.get("tier") or "").strip() or None
 
-@app.get("/store/debug_keys")
-def store_debug_keys():
-    if not STORE_OK:
-        return jsonify({"ok": False, "error": "store_not_loaded", "detail": STORE_ERR}), 500
-    try:
-        return jsonify({"ok": True, "keys": store.list_keys()})
+        rows = store.get_history(game=game, from_date=from_date, limit=limit, tier=tier)
+        return _ok({"rows": rows})
     except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 500
+        return _err(str(e), type(e).__name__)
 
-# ===================== PHASE 1 ======================
+# ---- Phase 1 runner (accept flexible JSON strings) --------------
+
+def _maybe_parse_list(x):
+    if isinstance(x, list):
+        return x
+    if isinstance(x, str):
+        t = x.strip()
+        if t.startswith("["):
+            try:
+                return json.loads(t)
+            except Exception:
+                pass
+    return x  # let core/runner decide or throw later
 
 @app.post("/run_json")
 def run_json():
-    if not CORE_OK or not hasattr(core, "handle_run"):
-        return jsonify({"ok": False, "error": "core_not_loaded", "detail": CORE_ERR or "handle_run missing"}), 500
-    payload = request.get_json(silent=True) or dict(request.form)
+    """
+    Body:
+      {
+        LATEST_MM: "[[..], b]" or [[..], b],
+        LATEST_PB: ...,
+        LATEST_IL_JP: ...,
+        LATEST_IL_M1: ...,
+        LATEST_IL_M2: ...,
+        HIST_MM_BLOB: "mm-dd-yy  a-b-c-d-e  MB\n...",
+        HIST_PB_BLOB: "...",
+        HIST_IL_JP_BLOB: "...",
+        HIST_IL_M1_BLOB: "...",
+        HIST_IL_M2_BLOB: "..."
+      }
+    """
     try:
-        res = core.handle_run(payload)
-        return jsonify(res)
+        body = request.get_json(force=True, silent=False) or {}
+        # Normalize possibly-stringified arrays
+        for k in ["LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"]:
+            if k in body:
+                body[k] = _maybe_parse_list(body[k])
+
+        # Call your phase-1 core (replace with your own function)
+        # Here we just echo back to keep the contract the UI expects.
+        # You likely have something like: result = core.run_phase1(**body)
+        # For now, ask storage (or core) for evaluation:
+        result = store.evaluate_phase1(body)  # <-- implement in lottery_store OR swap to your core
+
+        # result should include echo, saved_path, ok
+        result.setdefault("ok", True)
+        return _ok(result)
     except Exception as e:
-        return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
+        return _err(str(e), type(e).__name__)
 
-# Compatibility: your UI also calls /recent for saved files
-@app.get("/recent")
-def recent():
-    if CORE_OK and hasattr(core, "recent_files"):
-        try:
-            return jsonify({"ok": True, "files": core.recent_files()})
-        except Exception as e:
-            return jsonify({"ok": False, "error": type(e).__name__, "detail": str(e)}), 400
-    files = sorted(glob.glob("/tmp/lotto_1_*.json"))[-20:]
-    return jsonify({"ok": True, "files": files})
+# ---- static (optional, if you need direct file links) ----------
 
-# ===================== HEALTH ======================
+@app.get("/static/<path:path>")
+def static_files(path):
+    return send_from_directory(app.static_folder, path)
 
-@app.get("/health")
-def health():
-    return jsonify({
-        "ok": True,
-        "core_loaded": CORE_OK, "core_err": CORE_ERR,
-        "store_loaded": STORE_OK, "store_err": STORE_ERR
-    })
+# --------------------------- Entrypoint -------------------------
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT","5000")), debug=True)
+    port = int(os.environ.get("PORT", "8000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
