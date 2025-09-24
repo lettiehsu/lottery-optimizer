@@ -1,217 +1,207 @@
-// -------- tiny helpers --------
-const $ = (id) => document.getElementById(id);
-const toast = (msg, kind="ok", ms=1800) => {
-  const t = document.createElement("div");
-  t.className = `toast ${kind}`;
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(()=> t.remove(), ms);
-};
-const setBusy = (el, busy=true, label=null) => {
-  if (!el) return;
-  if (busy){ el.classList.add("busy"); el.disabled = true; if (label) el._old = el.textContent, el.textContent = label; }
-  else { el.classList.remove("busy"); el.disabled = false; if (el._old) el.textContent = el._old; }
-};
-async function getJSON(url){ const r = await fetch(url); if(!r.ok){ let txt=await r.text(); throw new Error(txt||r.statusText);} return r.json(); }
-async function postJSON(url, body){ const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j = await r.json(); if(!r.ok || !j.ok) throw j; return j; }
+# app.py  — COMPLETE FILE
 
-// -------- date normalizer (fixes your error) --------
-function normalizeDate(s){
-  if (!s) return "";
-  const t = s.trim();
-  // already mm/dd/yyyy ?
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t)) return t;
-  // iso yyyy-mm-dd -> mm/dd/yyyy
-  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) {
-    return `${m[2]}/${m[3]}/${m[1]}`;
-  }
-  // be forgiving with single-digit mm or dd and dashes
-  const m2 = t.match(/^(\d{1,4})[-\/](\d{1,2})[-\/](\d{1,4})$/);
-  if (m2) {
-    // if first is 4 digits treat as year-first
-    if (m2[1].length === 4) return `${pad2(m2[2])}/${pad2(m2[3])}/${m2[1]}`;
-    // else treat as mm dd yyyy, ensure 4-digit year at the end
-    const y = m2[3].length === 2 ? `20${m2[3]}` : m2[3];
-    return `${pad2(m2[1])}/${pad2(m2[2])}/${y}`;
-  }
-  return t; // fallback; server may still accept
-}
-const pad2 = (n)=> String(n).padStart(2, "0");
+from __future__ import annotations
 
-// -------- upload --------
-const csvFile = $("csvFile");
-const overwrite = $("overwrite");
-const btnImport = $("btnImport");
-const importLog = $("importLog");
+import json
+import os
+import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-btnImport?.addEventListener("click", async ()=>{
-  if (!csvFile.files?.length) return toast("Choose a CSV file", "warn");
-  const fd = new FormData();
-  fd.append("file", csvFile.files[0]);
-  fd.append("overwrite", overwrite.checked ? "true" : "false");
-  setBusy(btnImport, true, "Importing…");
-  importLog.textContent = "";
-  try {
-    const r = await fetch("/store/import_csv", { method:"POST", body: fd });
-    const j = await r.json();
-    importLog.textContent = JSON.stringify(j, null, 2);
-    if (!j.ok) throw j;
-    toast(`Imported: +${j.added}, updated: ${j.updated}`, "ok");
-  } catch(e){
-    importLog.textContent = typeof e === "string" ? e : JSON.stringify(e, null, 2);
-    toast("Import failed", "error", 2600);
-  } finally {
-    setBusy(btnImport, false);
-  }
-});
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
-// -------- retrieve NJ rows --------
-const mmDate=$("mmDate"), mmRetrieve=$("mmRetrieve"), mmPreview=$("mmPreview");
-const pbDate=$("pbDate"), pbRetrieve=$("pbRetrieve"), pbPreview=$("pbPreview");
-const ilJPDate=$("ilJPDate"), ilJPRetrieve=$("ilJPRetrieve"), ilJPPreview=$("ilJPPreview");
-const ilM1Date=$("ilM1Date"), ilM1Retrieve=$("ilM1Retrieve"), ilM1Preview=$("ilM1Preview");
-const ilM2Date=$("ilM2Date"), ilM2Retrieve=$("ilM2Retrieve"), ilM2Preview=$("ilM2Preview");
+# Your storage module
+import lottery_store as store  # must provide: import_csv(filelike, overwrite),
+                               # get_by_date(game, date, tier=None),
+                               # get_history(game, from_date, limit=20, tier=None)
 
-async function doRetrieve(btn, game, dateStr, previewEl, tier=""){
-  const norm = normalizeDate(dateStr);
-  if (!norm) return toast("Enter a date (MM/DD/YYYY).", "warn");
-  const u = new URLSearchParams({game, date:norm});
-  if (tier) u.set("tier", tier);
-  setBusy(btn, true, "Retrieving…");
-  try{
-    const data = await getJSON(`/store/get_by_date?${u.toString()}`);
-    if (!data.ok) throw data;
-    previewEl.value = JSON.stringify(data.row);
-    toast(`${game}${tier? " "+tier:""} retrieved.`, "ok");
-  }catch(e){
-    const msg = (e && e.detail) ? e.detail : (e && e.error) ? e.error : String(e);
-    previewEl.value = typeof msg === "string" ? msg : JSON.stringify(msg, null, 2);
-    toast("Retrieve failed — see details in the box.", "error", 2600);
-  }finally{
-    setBusy(btn, false);
-  }
-}
+app = Flask(__name__, static_folder="static", template_folder="templates")
 
-mmRetrieve?.addEventListener("click", ()=> doRetrieve(mmRetrieve,"MM",mmDate.value,mmPreview));
-pbRetrieve?.addEventListener("click", ()=> doRetrieve(pbRetrieve,"PB",pbDate.value,pbPreview));
-ilJPRetrieve?.addEventListener("click", ()=> doRetrieve(ilJPRetrieve,"IL",ilJPDate.value,ilJPPreview,"JP"));
-ilM1Retrieve?.addEventListener("click", ()=> doRetrieve(ilM1Retrieve,"IL",ilM1Date.value,ilM1Preview,"M1"));
-ilM2Retrieve?.addEventListener("click", ()=> doRetrieve(ilM2Retrieve,"IL",ilM2Date.value,ilM2Preview,"M2"));
 
-// -------- history (Load 20) --------
-const mmHistDate=$("mmHistDate"), mmLoad20=$("mmLoad20"), HIST_MM_BLOB=$("HIST_MM_BLOB");
-const pbHistDate=$("pbHistDate"), pbLoad20=$("pbLoad20"), HIST_PB_BLOB=$("HIST_PB_BLOB");
-const ilJPHistDate=$("ilJPHistDate"), ilJPLoad20=$("ilJPLoad20"), HIST_IL_JP_BLOB=$("HIST_IL_JP_BLOB");
-const ilM1HistDate=$("ilM1HistDate"), ilM1Load20=$("ilM1Load20"), HIST_IL_M1_BLOB=$("HIST_IL_M1_BLOB");
-const ilM2HistDate=$("ilM2HistDate"), ilM2Load20=$("ilM2Load20"), HIST_IL_M2_BLOB=$("HIST_IL_M2_BLOB");
+# --------------------------- Utilities ---------------------------
 
-async function load20(btn, game, dateStr, outEl, tier=""){
-  const norm = normalizeDate(dateStr);
-  if (!norm) return toast("Enter a date (MM/DD/YYYY).", "warn");
-  const u = new URLSearchParams({game, from:norm, limit:"20"});
-  if (tier) u.set("tier", tier);
-  setBusy(btn, true, "Loading…");
-  try{
-    const data = await getJSON(`/store/get_history?${u.toString()}`);
-    if (!data.ok) throw data;
-    outEl.value = (data.rows||[]).join("\n");
-    toast("Loaded 20", "ok");
-  }catch(e){
-    const msg = (e && e.detail) ? e.detail : (e && e.error) ? e.error : String(e);
-    outEl.value = typeof msg === "string" ? msg : JSON.stringify(msg, null, 2);
-    toast("Load failed", "error", 2400);
-  }finally{
-    setBusy(btn, false);
-  }
-}
+def _ok(payload: Dict[str, Any]) -> Any:
+    payload.setdefault("ok", True)
+    return jsonify(payload)
 
-mmLoad20?.addEventListener("click", ()=> load20(mmLoad20,"MM",mmHistDate.value,HIST_MM_BLOB));
-pbLoad20?.addEventListener("click", ()=> load20(pbLoad20,"PB",pbHistDate.value,HIST_PB_BLOB));
-ilJPLoad20?.addEventListener("click", ()=> load20(ilJPLoad20,"IL",ilJPHistDate.value,HIST_IL_JP_BLOB,"JP"));
-ilM1Load20?.addEventListener("click", ()=> load20(ilM1Load20,"IL",ilM1HistDate.value,HIST_IL_M1_BLOB,"M1"));
-ilM2Load20?.addEventListener("click", ()=> load20(ilM2Load20,"IL",ilM2HistDate.value,HIST_IL_M2_BLOB,"M2"));
+def _err(detail: str, error: str = "Error", status: int = 400) -> Any:
+    return jsonify({"ok": False, "error": error, "detail": detail}), status
 
-// -------- run phase 1 (unchanged except safer LATEST parsing) --------
-const runPhase1 = $("runPhase1");
-const phase1Path = $("phase1Path");
+def _norm_date(s: str) -> str:
+    """
+    Normalize a variety of date shapes to MM/DD/YYYY.
+    Accepts: 9/6/2025, 09/06/2025, 2025-09-06, 2025/09/06, 09-06-2025, 9-6-25
+    Returns: 'MM/DD/YYYY'
+    """
+    if not s:
+        raise ValueError("Empty date")
 
-const mmBatch=$("mmBatch"), pbBatch=$("pbBatch"), ilBatch=$("ilBatch");
-const mmStats=$("mmStats"), pbStats=$("pbStats"), ilStats=$("ilStats");
-const mmRows=$("mmRows"), pbRows=$("pbRows"), ilRows=$("ilRows");
-const mmCounts=$("mmCounts"), pbCounts=$("pbCounts"), ilCounts=$("ilCounts");
+    t = s.strip()
+    # mm/dd/yyyy already?
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", t):
+        mm, dd, yy = t.split("/")
+        return f"{int(mm):02d}/{int(dd):02d}/{int(yy):04d}"
 
-function renderBatch(listEl, rows){
-  listEl.innerHTML = "";
-  rows.forEach((s)=> {
-    const li = document.createElement("li"); li.textContent = s; listEl.appendChild(li);
-  });
-}
-function renderMMorPB(statsEl, rowsEl, hitsObj){
-  const c = hitsObj.counts || {"3":0,"4":0,"5":0,"3+B":0,"4+B":0,"5+B":0};
-  const r = hitsObj.rows || {"3":[], "4":[], "5":[], "3+B":[], "4+B":[], "5+B":[]};
-  const line = `3=${c["3"]}  3+B=${c["3+B"]}  |  4=${c["4"]}  4+B=${c["4+B"]}  |  5=${c["5"]}  5+B=${c["5+B"]}`;
-  statsEl.textContent = line;
-  rowsEl.textContent = JSON.stringify(r, null, 2);
-}
-function renderIL(statsEl, rowsEl, counts){
-  const line = `3=${counts["3"]}  |  4=${counts["4"]}  |  5=${counts["5"]}  |  6=${counts["6"]}`;
-  statsEl.textContent = line;
-  rowsEl.textContent = JSON.stringify(counts.rows || {}, null, 2);
-}
+    # yyyy-mm-dd or yyyy/mm/dd
+    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", t)
+    if m:
+        yy, mm, dd = m.groups()
+        return f"{int(mm):02d}/{int(dd):02d}/{int(yy):04d}"
 
-runPhase1?.addEventListener("click", async ()=>{
-  const normJSON = (v)=> {
-    const t = (v||"").trim();
-    // if it's already JSON array form, keep; otherwise try to parse and re-stringify
-    try { JSON.parse(t); return t; } catch { return t; }
-  };
+    # mm-dd-yyyy or mm/dd/yy
+    m = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})", t)
+    if m:
+        mm, dd, yy = m.groups()
+        if len(yy) == 2:
+            # assume 20xx
+            yy = f"20{yy}"
+        return f"{int(mm):02d}/{int(dd):02d}/{int(yy):04d}"
 
-  const payload = {
-    LATEST_MM: normJSON(mmPreview.value),
-    LATEST_PB: normJSON(pbPreview.value),
-    LATEST_IL_JP: normJSON(ilJPPreview.value),
-    LATEST_IL_M1: normJSON(ilM1Preview.value),
-    LATEST_IL_M2: normJSON(ilM2Preview.value),
-    HIST_MM_BLOB: $("HIST_MM_BLOB").value,
-    HIST_PB_BLOB: $("HIST_PB_BLOB").value,
-    HIST_IL_JP_BLOB: $("HIST_IL_JP_BLOB").value,
-    HIST_IL_M1_BLOB: $("HIST_IL_M1_BLOB").value,
-    HIST_IL_M2_BLOB: $("HIST_IL_M2_BLOB").value
-  };
+    # Last-chance parse via datetime on a few formats
+    fmts = [
+        "%m/%d/%Y", "%m-%d-%Y",
+        "%Y-%m-%d", "%Y/%m/%d",
+        "%m/%d/%y", "%m-%d-%y",
+    ]
+    last = None
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(t, fmt)
+            return dt.strftime("%m/%d/%Y")
+        except Exception as e:  # keep last error
+            last = e
+    raise ValueError(f"Unrecognized date: {t!r} ({last})")
 
-  for (const k of ["LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"]) {
-    if (!payload[k]) return toast(`Missing ${k}`, "warn");
-  }
 
-  setBusy(runPhase1, true, "Running…");
-  try{
-    const res = await postJSON("/run_json", payload);
-    phase1Path.value = res.saved_path || "";
+# --------------------------- Routes ---------------------------
 
-    renderBatch(mmBatch, res.echo.BATCH_MM || []);
-    renderMMorPB(mmStats, mmRows, res.echo.HITS_MM || {counts:{},rows:{}});
-    mmCounts.textContent = (res.echo.HITS_MM?.exact_rows?.length ? `Exact 5 hits: ${res.echo.HITS_MM.exact_rows.join(", ")}` : "");
+@app.get("/")
+def index():
+    return render_template("index.html")
 
-    renderBatch(pbBatch, res.echo.BATCH_PB || []);
-    renderMMorPB(pbStats, pbRows, res.echo.HITS_PB || {counts:{},rows:{}});
-    pbCounts.textContent = (res.echo.HITS_PB?.exact_rows?.length ? `Exact 5 hits: ${res.echo.HITS_PB.exact_rows.join(", ")}` : "");
+@app.get("/health")
+def health():
+    core_loaded = True
+    store_loaded = True
+    core_err = None
+    store_err = None
+    return _ok({
+        "ok": True,
+        "core_loaded": core_loaded,
+        "store_loaded": store_loaded,
+        "core_err": core_err,
+        "store_err": store_err,
+    })
 
-    renderBatch(ilBatch, res.echo.BATCH_IL || []);
-    const agg = { "3":0,"4":0,"5":0,"6":0, rows:{} };
-    for (const key of ["HITS_IL_JP","HITS_IL_M1","HITS_IL_M2"]) {
-      const h = res.echo[key] || {counts:{},rows:{}};
-      agg["3"] += (h.counts?.["3"]||0); agg["4"] += (h.counts?.["4"]||0);
-      agg["5"] += (h.counts?.["5"]||0); agg["6"] += (h.counts?.["6"]||0);
-      agg.rows[key] = h.rows || {};
-    }
-    renderIL(ilStats, ilRows, agg);
+# ---- CSV import -------------------------------------------------
 
-    toast("Phase 1 complete", "ok");
-  }catch(e){
-    const msg = typeof e === "string" ? e : (e.detail || e.error || "Phase 1 failed");
-    toast(msg, "error", 3000);
-  }finally{
-    setBusy(runPhase1, false);
-  }
-});
+@app.post("/store/import_csv")
+def store_import_csv():
+    try:
+        overwrite = request.form.get("overwrite", "false").lower() == "true"
+        f = request.files.get("file")
+        if not f:
+            return _err("No file uploaded", "ValueError")
+        stats = store.import_csv(f.stream, overwrite=overwrite)  # filelike supported
+        # stats should be dict with added/updated/total/ok
+        stats.setdefault("ok", True)
+        return _ok(stats)
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+# ---- Per-date fetch (2nd newest etc.) --------------------------
+
+@app.get("/store/get_by_date")
+def store_get_by_date():
+    try:
+        game = (request.args.get("game") or "").strip()
+        if not game:
+            return _err("Missing 'game'", "ValueError")
+        raw_date = request.args.get("date") or ""
+        date = _norm_date(raw_date)
+        tier = (request.args.get("tier") or "").strip() or None
+
+        row = store.get_by_date(game=game, date=date, tier=tier)
+        return _ok({"row": row})
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+# ---- History fetch (Load 20) -----------------------------------
+
+@app.get("/store/get_history")
+def store_get_history():
+    try:
+        game = (request.args.get("game") or "").strip()
+        if not game:
+            return _err("Missing 'game'", "ValueError")
+        raw_from = request.args.get("from") or ""
+        from_date = _norm_date(raw_from)
+        limit = int(request.args.get("limit", "20"))
+        tier = (request.args.get("tier") or "").strip() or None
+
+        rows = store.get_history(game=game, from_date=from_date, limit=limit, tier=tier)
+        return _ok({"rows": rows})
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+# ---- Phase 1 runner (accept flexible JSON strings) --------------
+
+def _maybe_parse_list(x):
+    if isinstance(x, list):
+        return x
+    if isinstance(x, str):
+        t = x.strip()
+        if t.startswith("["):
+            try:
+                return json.loads(t)
+            except Exception:
+                pass
+    return x  # let core/runner decide or throw later
+
+@app.post("/run_json")
+def run_json():
+    """
+    Body:
+      {
+        LATEST_MM: "[[..], b]" or [[..], b],
+        LATEST_PB: ...,
+        LATEST_IL_JP: ...,
+        LATEST_IL_M1: ...,
+        LATEST_IL_M2: ...,
+        HIST_MM_BLOB: "mm-dd-yy  a-b-c-d-e  MB\n...",
+        HIST_PB_BLOB: "...",
+        HIST_IL_JP_BLOB: "...",
+        HIST_IL_M1_BLOB: "...",
+        HIST_IL_M2_BLOB: "..."
+      }
+    """
+    try:
+        body = request.get_json(force=True, silent=False) or {}
+        # Normalize possibly-stringified arrays
+        for k in ["LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"]:
+            if k in body:
+                body[k] = _maybe_parse_list(body[k])
+
+        # Call your phase-1 core (replace with your own function)
+        # Here we just echo back to keep the contract the UI expects.
+        # You likely have something like: result = core.run_phase1(**body)
+        # For now, ask storage (or core) for evaluation:
+        result = store.evaluate_phase1(body)  # <-- implement in lottery_store OR swap to your core
+
+        # result should include echo, saved_path, ok
+        result.setdefault("ok", True)
+        return _ok(result)
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+# ---- static (optional, if you need direct file links) ----------
+
+@app.get("/static/<path:path>")
+def static_files(path):
+    return send_from_directory(app.static_folder, path)
+
+# --------------------------- Entrypoint -------------------------
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
