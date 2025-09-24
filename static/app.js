@@ -121,18 +121,16 @@ function renderBatch(listEl, rows){
     const li = document.createElement("li"); li.textContent = s; listEl.appendChild(li);
   });
 }
-function renderMMorPB(statsEl, rowsEl, counts){
-  const line = `3=${counts["3"]}  3+B=${counts["3+B"]}  |  4=${counts["4"]}  4+B=${counts["4+B"]}  |  5=${counts["5"]}  5+B=${counts["5+B"]}`;
+
+// ✅ FIXED: accept the whole hits object and use .counts / .rows correctly
+function renderMMorPB(statsEl, rowsEl, hitsObj){
+  const c = hitsObj.counts || {"3":0,"4":0,"5":0,"3+B":0,"4+B":0,"5+B":0};
+  const r = hitsObj.rows || {"3":[], "4":[], "5":[], "3+B":[], "4+B":[], "5+B":[]};
+  const line = `3=${c["3"]}  3+B=${c["3+B"]}  |  4=${c["4"]}  4+B=${c["4+B"]}  |  5=${c["5"]}  5+B=${c["5+B"]}`;
   statsEl.textContent = line;
-  rowsEl.textContent = JSON.stringify({
-    "3": counts.rows?.["3"] || counts["rows"]?.["3"] || [],
-    "3+B": counts.rows?.["3+B"] || counts["rows"]?.["3+B"] || [],
-    "4": counts.rows?.["4"] || counts["rows"]?.["4"] || [],
-    "4+B": counts.rows?.["4+B"] || counts["rows"]?.["4+B"] || [],
-    "5": counts.rows?.["5"] || counts["rows"]?.["5"] || [],
-    "5+B": counts.rows?.["5+B"] || counts["rows"]?.["5+B"] || []
-  }, null, 2);
+  rowsEl.textContent = JSON.stringify(r, null, 2);
 }
+
 function renderIL(statsEl, rowsEl, counts){
   const line = `3=${counts["3"]}  |  4=${counts["4"]}  |  5=${counts["5"]}  |  6=${counts["6"]}`;
   statsEl.textContent = line;
@@ -140,35 +138,45 @@ function renderIL(statsEl, rowsEl, counts){
 }
 
 runPhase1?.addEventListener("click", async ()=>{
+  // Normalize LATEST fields: allow raw JSON or already-stringified
+  const norm = (v)=> {
+    const t = (v||"").trim();
+    try { JSON.parse(t); return t; } catch { return t; }
+  };
+
   const payload = {
-    LATEST_MM: mmPreview.value.trim(),
-    LATEST_PB: pbPreview.value.trim(),
-    LATEST_IL_JP: ilJPPreview.value.trim(),
-    LATEST_IL_M1: ilM1Preview.value.trim(),
-    LATEST_IL_M2: ilM2Preview.value.trim(),
+    LATEST_MM: norm(mmPreview.value),
+    LATEST_PB: norm(pbPreview.value),
+    LATEST_IL_JP: norm(ilJPPreview.value),
+    LATEST_IL_M1: norm(ilM1Preview.value),
+    LATEST_IL_M2: norm(ilM2Preview.value),
     HIST_MM_BLOB: $("HIST_MM_BLOB").value,
     HIST_PB_BLOB: $("HIST_PB_BLOB").value,
     HIST_IL_JP_BLOB: $("HIST_IL_JP_BLOB").value,
     HIST_IL_M1_BLOB: $("HIST_IL_M1_BLOB").value,
     HIST_IL_M2_BLOB: $("HIST_IL_M2_BLOB").value
   };
-  // quick validation
+
   for (const k of ["LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"]) {
     if (!payload[k]) return toast(`Missing ${k}`, "warn");
   }
+
   setBusy(runPhase1, true, "Running…");
   try{
     const res = await postJSON("/run_json", payload);
     phase1Path.value = res.saved_path || "";
-    // render MM
+
+    // MM
     renderBatch(mmBatch, res.echo.BATCH_MM || []);
     renderMMorPB(mmStats, mmRows, res.echo.HITS_MM || {counts:{},rows:{}});
     mmCounts.textContent = (res.echo.HITS_MM?.exact_rows?.length ? `Exact 5 hits: ${res.echo.HITS_MM.exact_rows.join(", ")}` : "");
+
     // PB
     renderBatch(pbBatch, res.echo.BATCH_PB || []);
     renderMMorPB(pbStats, pbRows, res.echo.HITS_PB || {counts:{},rows:{}});
     pbCounts.textContent = (res.echo.HITS_PB?.exact_rows?.length ? `Exact 5 hits: ${res.echo.HITS_PB.exact_rows.join(", ")}` : "");
-    // IL (show JP/M1/M2 aggregated counts; rows are from each)
+
+    // IL (aggregate)
     renderBatch(ilBatch, res.echo.BATCH_IL || []);
     const agg = { "3":0,"4":0,"5":0,"6":0, rows:{} };
     for (const key of ["HITS_IL_JP","HITS_IL_M1","HITS_IL_M2"]) {
@@ -178,9 +186,11 @@ runPhase1?.addEventListener("click", async ()=>{
       agg.rows[key] = h.rows || {};
     }
     renderIL(ilStats, ilRows, agg);
+
     toast("Phase 1 complete", "ok");
   }catch(e){
-    toast(typeof e === "string" ? e : (e.detail || e.error || "Phase 1 failed"), "error", 2600);
+    const msg = typeof e === "string" ? e : (e.detail || e.error || "Phase 1 failed");
+    toast(msg, "error", 3000);
   }finally{
     setBusy(runPhase1, false);
   }
