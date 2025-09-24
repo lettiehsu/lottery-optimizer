@@ -1,156 +1,187 @@
-// Small helpers
+// -------- tiny helpers --------
 const $ = (id) => document.getElementById(id);
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const toast = (msg, kind="ok", ms=1800) => {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=> t.remove(), ms);
+};
+const setBusy = (el, busy=true, label=null) => {
+  if (!el) return;
+  if (busy){ el.classList.add("busy"); el.disabled = true; if (label) el._old = el.textContent, el.textContent = label; }
+  else { el.classList.remove("busy"); el.disabled = false; if (el._old) el.textContent = el._old; }
+};
+async function getJSON(url){ const r = await fetch(url); if(!r.ok){ let txt=await r.text(); throw new Error(txt||r.statusText);} return r.json(); }
+async function postJSON(url, body){ const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j = await r.json(); if(!r.ok || !j.ok) throw j; return j; }
 
-function toast(msg, kind="ok", ms=1600) {
-  const el = document.createElement("div");
-  el.className = `toast ${kind}`;
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(()=> el.classList.add("show"), 10);
-  setTimeout(()=> { el.classList.remove("show"); setTimeout(()=>el.remove(), 200); }, ms);
-}
-
-async function getJSON(url){
-  const r = await fetch(url);
-  const t = await r.text();
-  try { return JSON.parse(t); } catch { throw new Error(t || r.statusText); }
-}
-
-async function postForm(url, fd) {
-  const r = await fetch(url, { method: "POST", body: fd });
-  const t = await r.text();
-  try { return JSON.parse(t); } catch { throw new Error(t || r.statusText); }
-}
-
-function setBusy(btn, busy=true, labelWhenBusy="Working…") {
-  if (!btn) return;
-  if (busy) {
-    btn.dataset.label = btn.textContent;
-    btn.disabled = true;
-    btn.classList.add("busy");
-    btn.textContent = labelWhenBusy;
-  } else {
-    btn.disabled = false;
-    btn.classList.remove("busy");
-    if (btn.dataset.label) btn.textContent = btn.dataset.label;
-  }
-}
-
-
-// --- Upload CSV ---
+// -------- upload --------
 const csvFile = $("csvFile");
 const overwrite = $("overwrite");
 const btnImport = $("btnImport");
 const importLog = $("importLog");
 
-btnImport?.addEventListener("click", async () => {
+btnImport?.addEventListener("click", async ()=>{
+  if (!csvFile.files?.length) return toast("Choose a CSV file", "warn");
+  const fd = new FormData();
+  fd.append("file", csvFile.files[0]);
+  fd.append("overwrite", overwrite.checked ? "true" : "false");
+  setBusy(btnImport, true, "Importing…");
+  importLog.textContent = "";
   try {
-    if (!csvFile.files?.length) return toast("Choose a CSV file first.", "warn");
-    const fd = new FormData();
-    fd.append("file", csvFile.files[0]);
-    setBusy(btnImport, true, "Uploading…");
-    const data = await postForm(`/store/import_csv?overwrite=${overwrite.checked ? 1 : 0}`, fd);
-    importLog.textContent = JSON.stringify(data, null, 2);
-    if (data.ok) toast("Imported successfully.", "ok");
-    else toast(data.detail || data.error || "Import failed", "error", 2600);
-  } catch (e) {
-    importLog.textContent = String(e);
-    toast(String(e), "error", 2600);
+    const r = await fetch("/store/import_csv", { method:"POST", body: fd });
+    const j = await r.json();
+    importLog.textContent = JSON.stringify(j, null, 2);
+    if (!j.ok) throw j;
+    toast(`Imported: +${j.added}, updated: ${j.updated}`, "ok");
+  } catch(e){
+    importLog.textContent = typeof e === "string" ? e : JSON.stringify(e, null, 2);
+    toast("Import failed", "error", 2400);
   } finally {
     setBusy(btnImport, false);
   }
 });
 
+// -------- retrieve NJ rows --------
+const mmDate=$("mmDate"), mmRetrieve=$("mmRetrieve"), mmPreview=$("mmPreview");
+const pbDate=$("pbDate"), pbRetrieve=$("pbRetrieve"), pbPreview=$("pbPreview");
+const ilJPDate=$("ilJPDate"), ilJPRetrieve=$("ilJPRetrieve"), ilJPPreview=$("ilJPPreview");
+const ilM1Date=$("ilM1Date"), ilM1Retrieve=$("ilM1Retrieve"), ilM1Preview=$("ilM1Preview");
+const ilM2Date=$("ilM2Date"), ilM2Retrieve=$("ilM2Retrieve"), ilM2Preview=$("ilM2Preview");
 
-// --- Retrieve single row (2nd newest) ---
-async function doRetrieve(btn, game, dateStr, previewEl, tier="") {
+async function doRetrieve(btn, game, dateStr, previewEl, tier=""){
   if (!dateStr) return toast("Enter a date (MM/DD/YYYY).", "warn");
-  const u = new URLSearchParams({game, date: dateStr});
+  const u = new URLSearchParams({game, date:dateStr});
   if (tier) u.set("tier", tier);
   setBusy(btn, true, "Retrieving…");
-  try {
+  try{
     const data = await getJSON(`/store/get_by_date?${u.toString()}`);
-    if (!data.ok) throw new Error(data.detail || data.error || "Retrieve failed");
+    if (!data.ok) throw data;
     previewEl.value = JSON.stringify(data.row);
-    toast(`${game}${tier? " " + tier: ""} retrieved.`, "ok");
-  } catch (e) {
-    previewEl.value = "";
-    toast(String(e), "error", 2600);
-  } finally {
+    toast(`${game}${tier? " "+tier:""} retrieved.`, "ok");
+  }catch(e){
+    const msg = (e && e.detail) ? e.detail : (e && e.error) ? e.error : String(e);
+    previewEl.value = typeof msg === "string" ? msg : JSON.stringify(msg, null, 2);
+    toast("Retrieve failed — see details in the box.", "error", 2600);
+  }finally{
     setBusy(btn, false);
   }
 }
 
-$("mmRetrieve")?.addEventListener("click", ()=> doRetrieve($("mmRetrieve"), "MM", $("mmDate").value.trim(), $("mmPreview")));
-$("pbRetrieve")?.addEventListener("click", ()=> doRetrieve($("pbRetrieve"), "PB", $("pbDate").value.trim(), $("pbPreview")));
-$("ilJPRetrieve")?.addEventListener("click", ()=> doRetrieve($("ilJPRetrieve"), "IL", $("ilJPDate").value.trim(), $("ilJPPreview"), "JP"));
-$("ilM1Retrieve")?.addEventListener("click", ()=> doRetrieve($("ilM1Retrieve"), "IL", $("ilM1Date").value.trim(), $("ilM1Preview"), "M1"));
-$("ilM2Retrieve")?.addEventListener("click", ()=> doRetrieve($("ilM2Retrieve"), "IL", $("ilM2Date").value.trim(), $("ilM2Preview"), "M2"));
+mmRetrieve?.addEventListener("click", ()=> doRetrieve(mmRetrieve,"MM",mmDate.value.trim(),mmPreview));
+pbRetrieve?.addEventListener("click", ()=> doRetrieve(pbRetrieve,"PB",pbDate.value.trim(),pbPreview));
+ilJPRetrieve?.addEventListener("click", ()=> doRetrieve(ilJPRetrieve,"IL",ilJPDate.value.trim(),ilJPPreview,"JP"));
+ilM1Retrieve?.addEventListener("click", ()=> doRetrieve(ilM1Retrieve,"IL",ilM1Date.value.trim(),ilM1Preview,"M1"));
+ilM2Retrieve?.addEventListener("click", ()=> doRetrieve(ilM2Retrieve,"IL",ilM2Date.value.trim(),ilM2Preview,"M2"));
 
+// -------- history (Load 20) --------
+const mmHistDate=$("mmHistDate"), mmLoad20=$("mmLoad20"), HIST_MM_BLOB=$("HIST_MM_BLOB");
+const pbHistDate=$("pbHistDate"), pbLoad20=$("pbLoad20"), HIST_PB_BLOB=$("HIST_PB_BLOB");
+const ilJPHistDate=$("ilJPHistDate"), ilJPLoad20=$("ilJPLoad20"), HIST_IL_JP_BLOB=$("HIST_IL_JP_BLOB");
+const ilM1HistDate=$("ilM1HistDate"), ilM1Load20=$("ilM1Load20"), HIST_IL_M1_BLOB=$("HIST_IL_M1_BLOB");
+const ilM2HistDate=$("ilM2HistDate"), ilM2Load20=$("ilM2Load20"), HIST_IL_M2_BLOB=$("HIST_IL_M2_BLOB");
 
-// --- Load 20 history rows ---
-async function load20(btn, game, fromDate, outEl, tier="") {
-  if (!fromDate) return toast("Type the 3rd newest date first.", "warn");
-  const qs = new URLSearchParams({game, from: fromDate, limit: 20});
-  if (tier) qs.set("tier", tier);
+async function load20(btn, game, dateStr, outEl, tier=""){
+  if (!dateStr) return toast("Enter a date (MM/DD/YYYY).", "warn");
+  const u = new URLSearchParams({game, from:dateStr, limit:"20"});
+  if (tier) u.set("tier", tier);
   setBusy(btn, true, "Loading…");
-  try {
-    const data = await getJSON(`/store/get_history?${qs.toString()}`);
-    if (!data.ok) throw new Error(data.detail || data.error || "Load failed");
-    outEl.value = (data.rows || []).join("\n");
-    toast("Loaded 20.", "ok");
-  } catch (e) {
-    outEl.value = String(e);
-    toast(String(e), "error", 2600);
-  } finally {
+  try{
+    const data = await getJSON(`/store/get_history?${u.toString()}`);
+    if (!data.ok) throw data;
+    outEl.value = (data.rows||[]).join("\n");
+    toast("Loaded 20", "ok");
+  }catch(e){
+    const msg = (e && e.detail) ? e.detail : (e && e.error) ? e.error : String(e);
+    outEl.value = typeof msg === "string" ? msg : JSON.stringify(msg, null, 2);
+    toast("Load failed", "error", 2400);
+  }finally{
     setBusy(btn, false);
   }
 }
 
-$("loadMM")?.addEventListener("click", ()=> load20($("loadMM"), "MM", $("histMMDate").value.trim(), $("histMM")));
-$("loadPB")?.addEventListener("click", ()=> load20($("loadPB"), "PB", $("histPBDate").value.trim(), $("histPB")));
-$("loadILJP")?.addEventListener("click", ()=> load20($("loadILJP"), "IL", $("histILJPDate").value.trim(), $("histILJP"), "JP"));
-$("loadILM1")?.addEventListener("click", ()=> load20($("loadILM1"), "IL", $("histILM1Date").value.trim(), $("histILM1"), "M1"));
-$("loadILM2")?.addEventListener("click", ()=> load20($("loadILM2"), "IL", $("histILM2Date").value.trim(), $("histILM2"), "M2"));
+mmLoad20?.addEventListener("click", ()=> load20(mmLoad20,"MM",mmHistDate.value.trim(),HIST_MM_BLOB));
+pbLoad20?.addEventListener("click", ()=> load20(pbLoad20,"PB",pbHistDate.value.trim(),HIST_PB_BLOB));
+ilJPLoad20?.addEventListener("click", ()=> load20(ilJPLoad20,"IL",ilJPHistDate.value.trim(),HIST_IL_JP_BLOB,"JP"));
+ilM1Load20?.addEventListener("click", ()=> load20(ilM1Load20,"IL",ilM1HistDate.value.trim(),HIST_IL_M1_BLOB,"M1"));
+ilM2Load20?.addEventListener("click", ()=> load20(ilM2Load20,"IL",ilM2HistDate.value.trim(),HIST_IL_M2_BLOB,"M2"));
 
-
-// --- Run Phase 1 (placeholder that just echoes what you loaded) ---
+// -------- run phase 1 --------
 const runPhase1 = $("runPhase1");
 const phase1Path = $("phase1Path");
-const phase1Result = $("phase1Result");
-const doneBadge = $("doneBadge");
+
+const mmBatch=$("mmBatch"), pbBatch=$("pbBatch"), ilBatch=$("ilBatch");
+const mmStats=$("mmStats"), pbStats=$("pbStats"), ilStats=$("ilStats");
+const mmRows=$("mmRows"), pbRows=$("pbRows"), ilRows=$("ilRows");
+const mmCounts=$("mmCounts"), pbCounts=$("pbCounts"), ilCounts=$("ilCounts");
+
+function renderBatch(listEl, rows){
+  listEl.innerHTML = "";
+  rows.forEach((s)=> {
+    const li = document.createElement("li"); li.textContent = s; listEl.appendChild(li);
+  });
+}
+function renderMMorPB(statsEl, rowsEl, counts){
+  const line = `3=${counts["3"]}  3+B=${counts["3+B"]}  |  4=${counts["4"]}  4+B=${counts["4+B"]}  |  5=${counts["5"]}  5+B=${counts["5+B"]}`;
+  statsEl.textContent = line;
+  rowsEl.textContent = JSON.stringify({
+    "3": counts.rows?.["3"] || counts["rows"]?.["3"] || [],
+    "3+B": counts.rows?.["3+B"] || counts["rows"]?.["3+B"] || [],
+    "4": counts.rows?.["4"] || counts["rows"]?.["4"] || [],
+    "4+B": counts.rows?.["4+B"] || counts["rows"]?.["4+B"] || [],
+    "5": counts.rows?.["5"] || counts["rows"]?.["5"] || [],
+    "5+B": counts.rows?.["5+B"] || counts["rows"]?.["5+B"] || []
+  }, null, 2);
+}
+function renderIL(statsEl, rowsEl, counts){
+  const line = `3=${counts["3"]}  |  4=${counts["4"]}  |  5=${counts["5"]}  |  6=${counts["6"]}`;
+  statsEl.textContent = line;
+  rowsEl.textContent = JSON.stringify(counts.rows || {}, null, 2);
+}
 
 runPhase1?.addEventListener("click", async ()=>{
+  const payload = {
+    LATEST_MM: mmPreview.value.trim(),
+    LATEST_PB: pbPreview.value.trim(),
+    LATEST_IL_JP: ilJPPreview.value.trim(),
+    LATEST_IL_M1: ilM1Preview.value.trim(),
+    LATEST_IL_M2: ilM2Preview.value.trim(),
+    HIST_MM_BLOB: $("HIST_MM_BLOB").value,
+    HIST_PB_BLOB: $("HIST_PB_BLOB").value,
+    HIST_IL_JP_BLOB: $("HIST_IL_JP_BLOB").value,
+    HIST_IL_M1_BLOB: $("HIST_IL_M1_BLOB").value,
+    HIST_IL_M2_BLOB: $("HIST_IL_M2_BLOB").value
+  };
+  // quick validation
+  for (const k of ["LATEST_MM","LATEST_PB","LATEST_IL_JP","LATEST_IL_M1","LATEST_IL_M2"]) {
+    if (!payload[k]) return toast(`Missing ${k}`, "warn");
+  }
   setBusy(runPhase1, true, "Running…");
-  doneBadge.style.display = "none";
-  try {
-    // This demo just echos the blobs/preview text you already retrieved
-    const out = {
-      echo: {
-        LATEST_MM: $("mmPreview").value || null,
-        LATEST_PB: $("pbPreview").value || null,
-        LATEST_IL_JP: $("ilJPPreview").value || null,
-        LATEST_IL_M1: $("ilM1Preview").value || null,
-        LATEST_IL_M2: $("ilM2Preview").value || null,
-        HIST_MM_BLOB: $("histMM").value,
-        HIST_PB_BLOB: $("histPB").value,
-        HIST_IL_JP_BLOB: $("histILJP").value,
-        HIST_IL_M1_BLOB: $("histILM1").value,
-        HIST_IL_M2_BLOB: $("histILM2").value,
-        phase: "phase1"
-      },
-      ok: true
-    };
-    const fname = `/tmp/lotto_1_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
-    phase1Path.value = fname;
-    phase1Result.textContent = JSON.stringify(out, null, 2);
-    doneBadge.style.display = "inline-block";
-    toast("Phase 1 finished.", "ok");
-  } catch (e) {
-    phase1Result.textContent = String(e);
-    toast(String(e), "error", 2600);
-  } finally {
+  try{
+    const res = await postJSON("/run_json", payload);
+    phase1Path.value = res.saved_path || "";
+    // render MM
+    renderBatch(mmBatch, res.echo.BATCH_MM || []);
+    renderMMorPB(mmStats, mmRows, res.echo.HITS_MM || {counts:{},rows:{}});
+    mmCounts.textContent = (res.echo.HITS_MM?.exact_rows?.length ? `Exact 5 hits: ${res.echo.HITS_MM.exact_rows.join(", ")}` : "");
+    // PB
+    renderBatch(pbBatch, res.echo.BATCH_PB || []);
+    renderMMorPB(pbStats, pbRows, res.echo.HITS_PB || {counts:{},rows:{}});
+    pbCounts.textContent = (res.echo.HITS_PB?.exact_rows?.length ? `Exact 5 hits: ${res.echo.HITS_PB.exact_rows.join(", ")}` : "");
+    // IL (show JP/M1/M2 aggregated counts; rows are from each)
+    renderBatch(ilBatch, res.echo.BATCH_IL || []);
+    const agg = { "3":0,"4":0,"5":0,"6":0, rows:{} };
+    for (const key of ["HITS_IL_JP","HITS_IL_M1","HITS_IL_M2"]) {
+      const h = res.echo[key] || {counts:{},rows:{}};
+      agg["3"] += (h.counts?.["3"]||0); agg["4"] += (h.counts?.["4"]||0);
+      agg["5"] += (h.counts?.["5"]||0); agg["6"] += (h.counts?.["6"]||0);
+      agg.rows[key] = h.rows || {};
+    }
+    renderIL(ilStats, ilRows, agg);
+    toast("Phase 1 complete", "ok");
+  }catch(e){
+    toast(typeof e === "string" ? e : (e.detail || e.error || "Phase 1 failed"), "error", 2600);
+  }finally{
     setBusy(runPhase1, false);
   }
 });
